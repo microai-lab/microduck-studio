@@ -99,10 +99,39 @@ Run these from `microduck-studio`:
 | Open the live `robotctl` visual monitor in this terminal | `./scripts/dev-stack.sh monitor` |
 | Stop only this development stack | `./scripts/dev-stack.sh stop` |
 
-Press `q` to exit the monitor. A terminal at least 110 columns wide also shows its 3D robot view.
-
 Closing the MuJoCo window stops that simulator process. It is not automatically restarted; run
 `./scripts/dev-stack.sh` again when you want the complete stack back.
+
+### Open the `robotctl` visual monitor
+
+Start the development stack first, then use the launcher from the same `microduck-studio`
+directory:
+
+```bash
+./scripts/dev-stack.sh monitor
+```
+
+To invoke the same monitor directly through Compose, without the launcher wrapper:
+
+```bash
+docker compose run --rm --no-deps --build robotctl monitor
+```
+
+Both commands attach the monitor to the current terminal. They start a disposable `robotctl` tool
+container connected to the development stack's existing runtime socket; they do **not** open or
+enter a Docker shell. The wrapper form is preferred because it also checks that `robotd` is
+running.
+
+Monitor keys:
+
+| Key | Action |
+|---|---|
+| `q`, `Esc`, or `Ctrl-C` | Exit the monitor |
+| `[` / `]` or `Left` / `Right` | Rotate the 3D robot view |
+| `d` | Show or hide the 3D robot view |
+
+Use a terminal at least 110 columns wide for the 3D view. A narrower terminal continues to show
+the live status and joint tables.
 
 ### Container layout
 
@@ -127,11 +156,11 @@ Useful direct Compose commands:
 docker compose ps
 docker compose logs -f studio robotd
 docker compose run --rm --no-deps robotctl health
-docker compose run --rm --no-deps robotctl monitor
 ```
 
-The last two commands run `robotctl` in a temporary tool container attached to the same runtime
-socket. They do not enter the already-running `robotd` container.
+The health command runs `robotctl` in a temporary tool container attached to the same runtime
+socket. It does not enter the already-running `robotd` container. See
+[Open the `robotctl` visual monitor](#open-the-robotctl-visual-monitor) for the interactive monitor.
 
 ### Run only the MuJoCo Viewer
 
