@@ -74,6 +74,11 @@ git clone https://github.com/microai-lab/microduck-studio.git
 如果仓库已经存在，请不要重复克隆，只需确认目录结构符合上图。完整的 MuJoCo 联调还需要
 官方 `microduck` 的 `sim-remote-io` 分支：当前常规运行时分支没有 `robotd --sim` 后端，
 而该分支提供连接 MuJoCo 身体服务（默认 TCP `127.0.0.1:7801`）的远程 `RobotIo` 实现。
+
+`robotd --sim` 启动的仍是完整 `robotd`，只是用远程仿真 I/O 替代真实电机和传感器：它从
+`microduck_rl` 的 `duck-body` 读取关节与传感器状态，并把控制目标发送回 MuJoCo。控制循环、
+策略推理、安全检查以及 JSON-RPC 接口保持不变，因此 Studio 和 `robotctl` 可以通过与真机
+相同的接口控制仿真机器人。该后端不会启动 Viewer、执行训练或绕过 `robotd` 的安全逻辑。
 首次准备工作区时执行：
 
 ```bash
