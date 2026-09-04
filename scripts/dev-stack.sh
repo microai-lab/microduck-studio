@@ -169,6 +169,17 @@ ensure_robotd() {
     fi
 }
 
+ensure_robotctl() {
+    if [ ! -x "$SIM_SOURCE/target/debug/robotctl" ]; then
+        say "building robotctl monitor in Docker"
+        docker run --rm \
+            -v "$SIM_SOURCE:/workspace" \
+            -w /workspace \
+            "$RUST_IMAGE" \
+            cargo build -p robotctl
+    fi
+}
+
 ensure_onnxruntime() {
     ort_path="/opt/ort/onnxruntime/capi/libonnxruntime.so.$ORT_VERSION"
     if ! docker run --rm -v "$ORT_VOLUME:/opt/ort" "$PYTHON_IMAGE" \
@@ -356,6 +367,19 @@ print("MuJoCo:   " + ("online" if status["simulator"]["connected"] else "offline
 '
 }
 
+monitor_robot() {
+    docker container inspect "$ROBOTD_CONTAINER" >/dev/null 2>&1 ||
+        die "robotd is not running; start the development stack first"
+    docker run --rm -it \
+        -v "$SIM_SOURCE:/workspace:ro" \
+        -v "$SOCKET_VOLUME:/runtime" \
+        -w /workspace \
+        "$RUST_IMAGE" \
+        ./target/debug/robotctl \
+        --robot-socket /runtime/robotd.sock \
+        monitor
+}
+
 action=${1:-start}
 case "$action" in
     stop)
@@ -366,10 +390,12 @@ case "$action" in
         show_status
         exit 0
         ;;
+    monitor)
+        ;;
     start)
         ;;
     *)
-        die "usage: $0 [start|stop|status]"
+        die "usage: $0 [start|stop|status|monitor]"
         ;;
 esac
 
@@ -387,6 +413,11 @@ docker image inspect "$RUST_IMAGE" >/dev/null 2>&1 ||
 
 mkdir -p "$RUNTIME_DIR/jobs"
 ensure_sim_source
+if [ "$action" = monitor ]; then
+    ensure_robotctl
+    monitor_robot
+    exit 0
+fi
 ensure_robotd
 ensure_onnxruntime
 write_robotd_params
