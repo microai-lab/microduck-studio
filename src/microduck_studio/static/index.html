@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+    <meta name="theme-color" content="#10151f">
+    <title>Microduck Studio</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main>
+      <header><div><p class="eyebrow">LOCAL DEVELOPMENT COMPANION</p><h1>Microduck Studio</h1></div><span id="overall" class="pill">检查中</span></header>
+      <section class="status-grid">
+        <article><span>microduck</span><strong id="repo-runtime">—</strong><small id="repo-runtime-detail"></small></article>
+        <article><span>microduck_rl</span><strong id="repo-rl">—</strong><small id="repo-rl-detail"></small></article>
+        <article><span>robotd</span><strong id="robotd">—</strong><small id="robotd-detail"></small></article>
+        <article><span>MuJoCo body</span><strong id="sim">—</strong><small id="sim-detail"></small></article>
+      </section>
+
+      <section class="panel controller">
+        <div class="section-title"><div><p class="eyebrow">ROBOT CONTROL</p><h2>机器人自身坐标</h2></div><span id="control-status">等待操作</span></div>
+        <div class="actions">
+          <button class="primary" data-action="enable">启用 RL / 站起</button><button class="danger" data-action="stop">停止</button>
+          <button data-skill="sit_toggle">坐下 / 起身</button><button data-skill="roulade">前滚翻</button>
+          <button data-skill="kick_left">左踢</button><button data-skill="kick_right">右踢</button>
+        </div>
+        <div class="pad">
+          <button data-vyaw="1.5">↶<small>左转</small></button><button data-vx="0.3">↑<small>前进</small></button><button data-vyaw="-1.5">↷<small>右转</small></button>
+          <button data-vy="0.3">←<small>左移</small></button><button class="danger" data-action="stop">■<small>停止</small></button><button data-vy="-0.3">→<small>右移</small></button>
+          <i></i><button data-vx="-0.3">↓<small>后退</small></button><i></i>
+        </div>
+        <p class="hint">按住移动、松手停止。方向以鸭子自身朝向为准；不是屏幕坐标。</p>
+      </section>
+
+      <section class="panel training">
+        <div class="section-title"><div><p class="eyebrow">RL WORKBENCH</p><h2>训练 Smoke Test</h2></div><span id="jobs-mode" class="pill">—</span></div>
+        <form id="smoke-form"><input id="task-id" placeholder="TASK_ID" autocomplete="off"><button class="primary">64 envs · 5 iterations</button></form>
+        <div id="jobs" class="jobs"><p class="muted">还没有 Studio 启动的训练任务。</p></div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
