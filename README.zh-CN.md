@@ -60,9 +60,10 @@ cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
-启动器不会切换任何兄弟仓库的分支。它会在隔离的本地状态中构建上游仿真运行时，按依赖顺序
-启动所有服务，并在最后执行端到端控制探测。只有 HTTP 移动请求经过 `robotd` 和策略后确实
-让 MuJoCo 模型产生可测位移，脚本才会报告成功；仅 Web 页面可访问不算启动完成。
+启动器不会切换任何兄弟仓库的分支。它会在隔离的本地状态中准备上游仿真运行时，先启动
+macOS 原生 MuJoCo Viewer，再通过 Docker Compose 按依赖顺序构建并启动 `robotd` 和 Studio，
+最后执行端到端控制探测。只有 HTTP 移动请求经过 `robotd` 和策略后确实让 MuJoCo 模型产生
+可测位移，脚本才会报告成功；仅 Web 页面可访问不算启动完成。
 
 使用 `./scripts/dev-stack.sh status` 检查状态，使用 `./scripts/dev-stack.sh stop` 仅停止该
 启动器创建的服务。
@@ -71,6 +72,23 @@ MuJoCo，并且不会自动重启；再次运行启动器才会重新打开。
 
 运行 `./scripts/dev-stack.sh monitor` 可在当前终端直接打开 `robotctl` 实时可视化监控。
 按 `q` 退出；终端宽度达到 110 列时还会显示三维机器人视图。
+
+### 容器目录
+
+项目使用的容器定义全部放在本仓库，并按组件隔离：
+
+```text
+docker/
+├── microduck/       # robotd 与 robotctl 运行镜像
+├── microduck-rl/    # 可选的 Linux/无窗口 MuJoCo 镜像
+└── studio/          # Studio Web 镜像
+compose.yaml         # robotd、Studio、robotctl 与无窗口 MuJoCo 服务
+```
+
+启动器统一调用 `docker compose up`、`down` 和 `run`，不再用 `docker run` 分别启动容器。
+可用 `docker compose ps` 查看容器状态，用 `docker compose logs -f robotd` 查看日志。
+Docker Desktop 无法直接显示这套 macOS 原生 GUI，因此默认开发链路中的 Viewer 仍是宿主机
+进程；`mujoco-headless` Compose profile 用于 Linux/CI，不替代默认的 macOS Viewer。
 
 如果只需单独运行 Studio，不启动完整仿真控制链路：
 
@@ -86,7 +104,7 @@ uv run microduck-studio
 8080 端口的现有演示页面冲突。
 
 当 Studio 与 `robotd` 在同一环境中运行时，默认的 `/run/robotd.sock` 是合适的配置。
-完整链路启动器会自动创建并配置 Docker 到宿主机的 socket 转发。
+在 Compose 开发栈中，Studio 与 `robotd` 通过命名运行时卷共享这个 socket。
 
 ## 训练任务
 

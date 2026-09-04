@@ -7,18 +7,17 @@ WORKSPACE=$(dirname "$STUDIO_REPO")
 MICRODUCK_REPO=${MICRODUCK_REPO:-"$WORKSPACE/microduck"}
 MICRODUCK_RL_REPO=${MICRODUCK_RL_REPO:-"$WORKSPACE/microduck_rl"}
 RUNTIME_DIR=${MICRODUCK_STUDIO_RUNTIME:-"$STUDIO_REPO/.studio-runtime/dev-stack"}
+COMPOSE_FILE="$STUDIO_REPO/compose.yaml"
 
 BODY_PORT=${MICRODUCK_BODY_PORT:-7801}
-BRIDGE_PORT=${MICRODUCK_RPC_BRIDGE_PORT:-8765}
 STUDIO_PORT=${MICRODUCK_STUDIO_PORT:-8090}
 SIM_REF=${MICRODUCK_SIM_REF:-upstream/sim-remote-io}
-RUST_IMAGE=${MICRODUCK_RUST_IMAGE:-microduck-dev:local}
-PYTHON_IMAGE=${MICRODUCK_PYTHON_IMAGE:-python:3.13-slim}
+RUST_IMAGE=${MICRODUCK_RUST_IMAGE:-rust:1.89-bookworm}
 ORT_VERSION=${MICRODUCK_ORT_VERSION:-1.28.0}
-ORT_VOLUME=microduck-studio-ort
-SOCKET_VOLUME=microduck-studio-runtime
 ROBOTD_CONTAINER=microduck-studio-robotd
 RPC_CONTAINER=microduck-studio-rpc-bridge
+WEB_CONTAINER=microduck-studio-web
+RUNTIME_VOLUME=microduck-studio-runtime
 HOST_SOCKET=/tmp/microduck-studio-robotd.sock
 HOST_BRIDGE_SCRIPT=/tmp/microduck-studio-rpc-bridge.py
 HOST_STUDIO_SCRIPT=/tmp/microduck-studio-run-web.sh
@@ -44,6 +43,15 @@ remove_label() {
 
 remove_container() {
     docker container inspect "$1" >/dev/null 2>&1 && docker rm -f "$1" >/dev/null || true
+}
+
+compose() {
+    docker compose --project-directory "$STUDIO_REPO" -f "$COMPOSE_FILE" "$@"
+}
+
+ensure_runtime_volume() {
+    docker volume inspect "$RUNTIME_VOLUME" >/dev/null 2>&1 ||
+        docker volume create "$RUNTIME_VOLUME" >/dev/null
 }
 
 body_pid() {
@@ -80,11 +88,14 @@ stop_body() {
 
 stop_stack() {
     say "stopping Studio development stack"
+    # Remove host jobs and containers created by launcher versions before Compose.
     remove_label "$WEB_LABEL"
     remove_label "$SOCKET_LABEL"
     stop_body
+    compose down --remove-orphans >/dev/null 2>&1 || true
     remove_container "$RPC_CONTAINER"
     remove_container "$ROBOTD_CONTAINER"
+    remove_container "$WEB_CONTAINER"
     rm -f "$HOST_SOCKET" "$HOST_BRIDGE_SCRIPT" "$HOST_STUDIO_SCRIPT"
 }
 
@@ -103,47 +114,6 @@ wait_tcp() {
     die "$name did not listen on $host:$port"
 }
 
-wait_file_socket() {
-    socket_path=$1
-    attempts=0
-    while [ "$attempts" -lt 80 ]; do
-        [ -S "$socket_path" ] && return 0
-        attempts=$((attempts + 1))
-        sleep 0.25
-    done
-    die "robotd socket bridge did not become ready"
-}
-
-wait_container_socket() {
-    container=$1
-    socket_path=$2
-    attempts=0
-    while [ "$attempts" -lt 80 ]; do
-        docker exec "$container" test -S "$socket_path" >/dev/null 2>&1 && return 0
-        attempts=$((attempts + 1))
-        sleep 0.25
-    done
-    die "robotd did not create its container socket"
-}
-
-resolve_uv() {
-    if [ -n "${MICRODUCK_UV_BIN:-}" ] && [ -x "$MICRODUCK_UV_BIN" ]; then
-        printf '%s\n' "$MICRODUCK_UV_BIN"
-        return
-    fi
-    if command -v uv >/dev/null 2>&1; then
-        command -v uv
-        return
-    fi
-    for candidate in "$HOME/.local/bin/uv" /opt/homebrew/bin/uv /usr/local/bin/uv; do
-        if [ -x "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return
-        fi
-    done
-    die "uv is not installed"
-}
-
 ensure_sim_source() {
     commit=$(git -C "$MICRODUCK_REPO" rev-parse "$SIM_REF^{commit}") ||
         die "missing $SIM_REF; fetch it in the microduck repository"
@@ -156,40 +126,17 @@ ensure_sim_source() {
         git -C "$MICRODUCK_REPO" archive "$commit" | tar -x -C "$temporary"
         mv "$temporary" "$SIM_SOURCE"
     fi
-}
-
-ensure_robotd() {
-    if [ ! -x "$SIM_SOURCE/target/debug/robotd" ]; then
-        say "building robotd --sim in Docker"
-        docker run --rm \
-            -v "$SIM_SOURCE:/workspace" \
-            -w /workspace \
-            "$RUST_IMAGE" \
-            cargo build -p robotd
-    fi
-}
-
-ensure_robotctl() {
-    if [ ! -x "$SIM_SOURCE/target/debug/robotctl" ]; then
-        say "building robotctl monitor in Docker"
-        docker run --rm \
-            -v "$SIM_SOURCE:/workspace" \
-            -w /workspace \
-            "$RUST_IMAGE" \
-            cargo build -p robotctl
-    fi
-}
-
-ensure_onnxruntime() {
-    ort_path="/opt/ort/onnxruntime/capi/libonnxruntime.so.$ORT_VERSION"
-    if ! docker run --rm -v "$ORT_VOLUME:/opt/ort" "$PYTHON_IMAGE" \
-        test -f "$ort_path"; then
-        say "installing ONNX Runtime $ORT_VERSION in an isolated Docker volume"
-        docker run --rm -v "$ORT_VOLUME:/opt/ort" "$PYTHON_IMAGE" \
-            pip install --no-cache-dir --target /opt/ort "onnxruntime==$ORT_VERSION"
-    fi
-    ORT_PATH=$ort_path
-    export ORT_PATH
+    # BuildKit must not send the local Cargo output back into the image build context.
+    printf 'target\n' >"$SIM_SOURCE/.dockerignore"
+    MICRODUCK_SIM_SOURCE=$SIM_SOURCE
+    MICRODUCK_RUNTIME_DIR=$RUNTIME_DIR
+    MICRODUCK_BODY_PORT=$BODY_PORT
+    MICRODUCK_STUDIO_PORT=$STUDIO_PORT
+    MICRODUCK_RUST_IMAGE=$RUST_IMAGE
+    MICRODUCK_ORT_VERSION=$ORT_VERSION
+    export MICRODUCK_SIM_SOURCE MICRODUCK_RUNTIME_DIR
+    export MICRODUCK_REPO MICRODUCK_RL_REPO MICRODUCK_BODY_PORT MICRODUCK_STUDIO_PORT
+    export MICRODUCK_RUST_IMAGE MICRODUCK_ORT_VERSION
 }
 
 write_robotd_params() {
@@ -198,13 +145,13 @@ write_robotd_params() {
     cat >"$PARAMS_FILE" <<'EOF'
 [policy]
 enabled = true
-walk = "/workspace/policies/alpha_walking.onnx"
-stand = "/workspace/policies/alpha_stand.onnx"
-sitstand = "/workspace/policies/alpha_sitstand.onnx"
-ground_pick = "/workspace/policies/alpha_ground_pick.onnx"
-kick_left = "/workspace/policies/ball_kick_left.onnx"
-kick_right = "/workspace/policies/ball_kick_right.onnx"
-roulade = "/workspace/policies/roulade.onnx"
+walk = "/opt/microduck/policies/alpha_walking.onnx"
+stand = "/opt/microduck/policies/alpha_stand.onnx"
+sitstand = "/opt/microduck/policies/alpha_sitstand.onnx"
+ground_pick = "/opt/microduck/policies/alpha_ground_pick.onnx"
+kick_left = "/opt/microduck/policies/ball_kick_left.onnx"
+kick_right = "/opt/microduck/policies/ball_kick_right.onnx"
+roulade = "/opt/microduck/policies/roulade.onnx"
 
 [audio]
 device = "default"
@@ -245,52 +192,9 @@ with open(path, "wb") as output:
     wait_tcp 127.0.0.1 "$BODY_PORT" "MuJoCo body"
 }
 
-start_robotd() {
-    say "starting robotd with the MuJoCo backend and policies"
-    docker run --rm -v "$SOCKET_VOLUME:/runtime" "$PYTHON_IMAGE" \
-        python -c 'from pathlib import Path; Path("/runtime/robotd.sock").unlink(missing_ok=True)'
-    docker run -d --rm --name "$ROBOTD_CONTAINER" \
-        -e "ORT_DYLIB_PATH=$ORT_PATH" \
-        -v "$SIM_SOURCE:/workspace:ro" \
-        -v "$PARAMS_FILE:/config/robotd.toml:ro" \
-        -v "$SOCKET_VOLUME:/runtime" \
-        -v "$ORT_VOLUME:/opt/ort:ro" \
-        "$RUST_IMAGE" \
-        /workspace/target/debug/robotd \
-        --sim "host.docker.internal:$BODY_PORT" \
-        --params /config/robotd.toml \
-        --socket /runtime/robotd.sock >/dev/null
-    wait_container_socket "$ROBOTD_CONTAINER" /runtime/robotd.sock
-
-    say "starting Docker and host RPC bridges"
-    docker run -d --rm --name "$RPC_CONTAINER" \
-        -p "127.0.0.1:$BRIDGE_PORT:$BRIDGE_PORT" \
-        -v "$SOCKET_VOLUME:/runtime" \
-        -v "$SCRIPT_DIR/rpc_bridge.py:/bridge.py:ro" \
-        "$PYTHON_IMAGE" \
-        python /bridge.py tcp-to-unix \
-        --port "$BRIDGE_PORT" --unix-socket /runtime/robotd.sock >/dev/null
-    wait_tcp 127.0.0.1 "$BRIDGE_PORT" "Docker RPC bridge"
-
-    # launchd's system Python cannot read scripts below Documents on a default macOS privacy
-    # configuration. A scoped temporary copy keeps the service independent of that TCC rule.
-    cp "$SCRIPT_DIR/rpc_bridge.py" "$HOST_BRIDGE_SCRIPT"
-    launchctl submit -l "$SOCKET_LABEL" \
-        -o "$RUNTIME_DIR/socket-bridge.log" -e "$RUNTIME_DIR/socket-bridge.log" -- \
-        /usr/bin/python3 "$HOST_BRIDGE_SCRIPT" unix-to-tcp \
-        --unix-socket "$HOST_SOCKET" --port "$BRIDGE_PORT"
-    wait_file_socket "$HOST_SOCKET"
-}
-
-start_web() {
-    uv_bin=$(resolve_uv)
-    say "starting Microduck Studio"
-    cp "$SCRIPT_DIR/run-studio.sh" "$HOST_STUDIO_SCRIPT"
-    chmod +x "$HOST_STUDIO_SCRIPT"
-    launchctl submit -l "$WEB_LABEL" \
-        -o "$RUNTIME_DIR/studio.log" -e "$RUNTIME_DIR/studio.log" -- \
-        "$HOST_STUDIO_SCRIPT" "$STUDIO_REPO" "$uv_bin" "$HOST_SOCKET" \
-        "$BODY_PORT" "$STUDIO_PORT" "$RUNTIME_DIR/jobs"
+start_compose() {
+    say "building and starting robotd and Microduck Studio with Docker Compose"
+    compose up -d --build --wait --wait-timeout 60 robotd studio
     wait_tcp 127.0.0.1 "$STUDIO_PORT" "Microduck Studio"
 }
 
@@ -336,7 +240,7 @@ verify_control() {
     curl -fsS -X POST -H 'content-type: application/json' \
         -d '{"on":true}' "$base_url/api/control/enable" >/dev/null
     before=$(curl -fsS "$base_url/api/status" | python3 -c \
-        'import json,sys; print(json.load(sys.stdin)["simulator"]["trunk"][0])')
+        'import json,sys; p=json.load(sys.stdin)["simulator"]["trunk"]; print(f"{p[0]},{p[1]}")')
     count=0
     while [ "$count" -lt 30 ]; do
         curl -fsS -X POST -H 'content-type: application/json' \
@@ -346,14 +250,15 @@ verify_control() {
     done
     curl -fsS -X POST "$base_url/api/control/stop" >/dev/null
     after=$(curl -fsS "$base_url/api/status" | python3 -c \
-        'import json,sys; print(json.load(sys.stdin)["simulator"]["trunk"][0])')
+        'import json,sys; p=json.load(sys.stdin)["simulator"]["trunk"]; print(f"{p[0]},{p[1]}")')
     python3 -c '
-import sys
-before, after = map(float, sys.argv[1:])
-delta = after - before
-if delta < 0.02:
-    raise SystemExit(f"control probe moved only {delta:.3f} m")
-print(f"control probe passed: MuJoCo moved forward {delta:.3f} m")
+import math, sys
+before_x, before_y = map(float, sys.argv[1].split(","))
+after_x, after_y = map(float, sys.argv[2].split(","))
+distance = math.hypot(after_x - before_x, after_y - before_y)
+if distance < 0.02:
+    raise SystemExit(f"control probe moved only {distance:.3f} m")
+print(f"control probe passed: MuJoCo moved {distance:.3f} m")
 ' "$before" "$after"
 }
 
@@ -370,14 +275,7 @@ print("MuJoCo:   " + ("online" if status["simulator"]["connected"] else "offline
 monitor_robot() {
     docker container inspect "$ROBOTD_CONTAINER" >/dev/null 2>&1 ||
         die "robotd is not running; start the development stack first"
-    docker run --rm -it \
-        -v "$SIM_SOURCE:/workspace:ro" \
-        -v "$SOCKET_VOLUME:/runtime" \
-        -w /workspace \
-        "$RUST_IMAGE" \
-        ./target/debug/robotctl \
-        --robot-socket /runtime/robotd.sock \
-        monitor
+    compose run --rm --no-deps --build robotctl
 }
 
 action=${1:-start}
@@ -408,18 +306,13 @@ need python3
 [ -d "$MICRODUCK_REPO/.git" ] || die "microduck sibling repository is missing"
 [ -f "$MICRODUCK_RL_REPO/.venv/bin/mjpython" ] || die "run 'uv sync' in microduck_rl first"
 docker info >/dev/null 2>&1 || die "Docker Desktop is not running"
-docker image inspect "$RUST_IMAGE" >/dev/null 2>&1 ||
-    die "missing Docker image $RUST_IMAGE (set MICRODUCK_RUST_IMAGE to another Rust image)"
-
 mkdir -p "$RUNTIME_DIR/jobs"
 ensure_sim_source
+ensure_runtime_volume
 if [ "$action" = monitor ]; then
-    ensure_robotctl
     monitor_robot
     exit 0
 fi
-ensure_robotd
-ensure_onnxruntime
 write_robotd_params
 
 stop_stack
@@ -431,8 +324,7 @@ trap 'code=$?; if [ "$code" -ne 0 ]; then
     fi
 fi; exit "$code"' EXIT
 start_body
-start_robotd
-start_web
+start_compose
 verify_status
 verify_control
 verify_status

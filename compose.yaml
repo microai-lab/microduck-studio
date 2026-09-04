@@ -1,0 +1,103 @@
+name: microduck-studio
+
+x-microduck-image: &microduck-image
+  image: microduck-studio-runtime:local
+  build:
+    context: .
+    dockerfile: docker/microduck/Dockerfile
+    additional_contexts:
+      microduck_source: ${MICRODUCK_SIM_SOURCE:-../microduck}
+    args:
+      RUST_IMAGE: ${MICRODUCK_RUST_IMAGE:-rust:1.89-bookworm}
+      ORT_VERSION: ${MICRODUCK_ORT_VERSION:-1.28.0}
+
+services:
+  robotd:
+    <<: *microduck-image
+    container_name: microduck-studio-robotd
+    command:
+      - robotd
+      - --sim
+      - host.docker.internal:${MICRODUCK_BODY_PORT:-7801}
+      - --params
+      - /config/robotd.toml
+      - --socket
+      - /runtime/robotd.sock
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - runtime:/runtime
+      - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/robotd.toml:/config/robotd.toml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /runtime/robotd.sock"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+    restart: "no"
+
+  studio:
+    image: microduck-studio-web:local
+    build:
+      context: .
+      dockerfile: docker/studio/Dockerfile
+    container_name: microduck-studio-web
+    depends_on:
+      robotd:
+        condition: service_healthy
+    environment:
+      MICRODUCK_REPO: /repos/microduck
+      MICRODUCK_RL_REPO: /repos/microduck_rl
+      MICRODUCK_ROBOTD_SOCKET: /runtime/robotd.sock
+      MICRODUCK_BODY_HOST: host.docker.internal
+      MICRODUCK_BODY_PORT: ${MICRODUCK_BODY_PORT:-7801}
+      MICRODUCK_STUDIO_HOST: 0.0.0.0
+      MICRODUCK_STUDIO_PORT: 8090
+      MICRODUCK_STUDIO_ENABLE_JOBS: "false"
+      MICRODUCK_STUDIO_RUNTIME: /state
+      GIT_CONFIG_COUNT: 1
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: input
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - 127.0.0.1:${MICRODUCK_STUDIO_PORT:-8090}:8090
+    volumes:
+      - runtime:/runtime
+      - ${MICRODUCK_REPO:-../microduck}:/repos/microduck:ro
+      - ${MICRODUCK_RL_REPO:-../microduck_rl}:/repos/microduck_rl:ro
+      - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/jobs:/state/jobs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/api/status', timeout=1)
+      interval: 1s
+      timeout: 2s
+      retries: 30
+    restart: "no"
+
+  robotctl:
+    <<: *microduck-image
+    profiles: [tools]
+    entrypoint: [robotctl]
+    command: [--robot-socket, /runtime/robotd.sock, monitor]
+    volumes:
+      - runtime:/runtime
+
+  mujoco-headless:
+    profiles: [headless]
+    image: microduck-studio-mujoco:local
+    build:
+      context: .
+      dockerfile: docker/microduck-rl/Dockerfile
+      additional_contexts:
+        microduck_rl_source: ${MICRODUCK_RL_REPO:-../microduck_rl}
+    ports:
+      - 127.0.0.1:${MICRODUCK_BODY_PORT:-7801}:7801
+    restart: "no"
+
+volumes:
+  runtime:
+    name: microduck-studio-runtime
+    external: true
