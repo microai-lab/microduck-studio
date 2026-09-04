@@ -40,7 +40,7 @@ The current one-command stack needs Docker with Docker Compose, `git`, `curl`, P
 [`uv`](https://docs.astral.sh/uv/). On macOS, Docker Desktop is one option, but any compatible
 Docker runtime is suitable. Docker is not a hard dependency of the individual projects, which can
 also run directly on the host. This workflow uses it to isolate the `robotd` and Studio Web build
-and runtime environments, and the current launcher still relies on that isolation.
+and runtime environments; the `dev-stack.sh` launcher relies on that isolation.
 
 ### 1. Download the three repositories
 
@@ -72,11 +72,12 @@ Download links: [microduck](https://github.com/ttfont/microduck),
 forks of the [official runtime](https://github.com/pollen-robotics/microduck) and
 [official RL repository](https://github.com/pollen-robotics/microduck_rl).
 
-If the repositories already exist, do not clone them again; just confirm the directory layout
-above. Full MuJoCo integration also needs the official `microduck` `sim-remote-io` branch. The
-regular runtime branch in this setup does not provide the `robotd --sim` backend; `sim-remote-io`
-provides the remote `RobotIo` implementation that connects `robotd` to the MuJoCo body service on
-TCP `127.0.0.1:7801` by default. Prepare it once from the workspace directory:
+Existing repositories do not need to be cloned again; their directory layout only needs to match
+the structure above. Full MuJoCo integration also needs the official `microduck` `sim-remote-io`
+branch. The cloned development fork's regular runtime branch does not provide the `robotd --sim`
+backend; `sim-remote-io` provides the remote `RobotIo` implementation that connects `robotd` to
+the MuJoCo body service on TCP `127.0.0.1:7801` by default. Prepare it once from the workspace
+directory:
 
 ```bash
 git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
@@ -117,7 +118,7 @@ control probe passed: MuJoCo moved ... m
 > The launcher never switches a sibling repository's working branch. It extracts the required
 > `sim-remote-io` runtime revision into isolated Studio state.
 
-## What you get
+## Capabilities
 
 | Web control | Live visibility | Safe orchestration |
 |---|---|---|
@@ -282,7 +283,8 @@ uv run ruff format --check .
 
 ## Safety
 
-Studio v0.1 has no authentication. Bind it to `127.0.0.1` unless you are on a trusted LAN. Studio
+Studio v0.1 has no authentication. Bind it to `127.0.0.1`; non-loopback binding should be limited
+to trusted LANs. Studio
 sends intents only; `robotd` remains the sole safety and motor authority.
 
 ## License

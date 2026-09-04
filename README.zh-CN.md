@@ -38,9 +38,9 @@ Microduck Studio 把现有的
 
 当前一键联合启动需要可用的 Docker（含 Docker Compose）、`git`、`curl`、Python 3 和
 [`uv`](https://docs.astral.sh/uv/)。macOS 可以使用 Docker Desktop，也可以使用其他兼容的
-Docker 运行环境；项目本身并不强制依赖 Docker，各组件也可以分别在宿主机运行。这里使用
-Docker 是为了隔离 `robotd` 与 Studio Web 的构建和运行环境，你当前的一键启动方案仍采用
-这种方式。
+Docker 运行环境；项目本身并不强制依赖 Docker，各组件也可以分别在宿主机运行。该工作流
+使用 Docker 隔离 `robotd` 与 Studio Web 的构建和运行环境；
+`dev-stack.sh` 一键联合启动依赖这种隔离方式。
 
 ### 1. 下载三个仓库
 
@@ -54,7 +54,7 @@ microduck-dev/          # 仅作为工作区，不是 Git 仓库
 └── microduck-studio/   # Web 界面和开发链路编排
 ```
 
-全新安装时，下载当前开发环境使用的三个仓库：
+全新安装时，下载该开发工作区使用的三个仓库：
 
 ```bash
 mkdir -p ~/microduck-dev
