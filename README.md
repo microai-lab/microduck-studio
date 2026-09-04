@@ -18,6 +18,15 @@
 </p>
 
 <p align="center">
+  AI coding ready:
+  <a href="https://developers.openai.com/codex/">Codex</a> ·
+  <a href="https://code.claude.com/docs/en/overview">Claude Code</a> ·
+  <a href="https://cursor.com/docs/agent/overview">Cursor Agent</a> ·
+  <a href="https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-copilot-cli">GitHub Copilot CLI</a>
+</p>
+
+<p align="center">
+  <a href="#start-with-an-ai-coding-agent">AI startup</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#robotctl-monitor">Monitor</a> ·
   <a href="#how-the-projects-fit-together">Architecture</a> ·
@@ -33,6 +42,28 @@ Microduck Studio connects the existing
 [`microduck_rl`](https://github.com/pollen-robotics/microduck_rl) simulation/training project in
 one browser-based development workflow. It presents status and safe control; it does not duplicate
 robot safety, policy inference, simulator physics, or training logic.
+
+## Start with an AI coding agent
+
+Any local AI coding agent with repository and terminal access can start the complete stack; no
+tool-specific integration is required. Supported examples include
+[Codex](https://developers.openai.com/codex/),
+[Claude Code](https://code.claude.com/docs/en/overview),
+[Cursor Agent](https://cursor.com/docs/agent/overview), and
+[GitHub Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-copilot-cli).
+
+Open the `microduck-dev` workspace in a local session and use this prompt:
+
+```text
+Start all Microduck Studio services. First read AGENTS.md and microduck-studio/README.md. Check the
+three sibling repositories, Docker, uv, and ports 7801 and 8090. Then run
+./scripts/dev-stack.sh from microduck-studio. Wait for "control probe passed" before reporting the
+Studio URL and the status of Studio, robotd, and MuJoCo. Do not start a training job, and do not
+switch or modify the working branches of the sibling repositories.
+```
+
+> Use a local agent session with access to Docker and the desktop. A cloud or background agent can
+> run in a different machine and cannot display the native MuJoCo Viewer on the development host.
 
 ## Quick start
 

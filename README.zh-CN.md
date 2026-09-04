@@ -18,6 +18,15 @@
 </p>
 
 <p align="center">
+  支持 AI Coding：
+  <a href="https://developers.openai.com/codex/">Codex</a> ·
+  <a href="https://code.claude.com/docs/en/overview">Claude Code</a> ·
+  <a href="https://cursor.com/docs/agent/overview">Cursor Agent</a> ·
+  <a href="https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-copilot-cli">GitHub Copilot CLI</a>
+</p>
+
+<p align="center">
+  <a href="#使用-ai-coding-工具启动">AI 启动</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#robotctl-monitor">终端监控</a> ·
   <a href="#三个项目如何协作">项目架构</a> ·
@@ -33,6 +42,26 @@ Microduck Studio 把现有的
 [`microduck_rl`](https://github.com/pollen-robotics/microduck_rl) 仿真/训练项目连接成一套
 基于浏览器的开发流程。它负责呈现状态和安全控制，不会复制机器人安全、策略推理、仿真物理
 或训练逻辑。
+
+## 使用 AI Coding 工具启动
+
+任何能够访问项目文件和本地终端的 AI Coding 工具都可以启动完整链路，不需要专用集成。
+常用工具包括 [Codex](https://developers.openai.com/codex/)、
+[Claude Code](https://code.claude.com/docs/en/overview)、
+[Cursor Agent](https://cursor.com/docs/agent/overview) 和
+[GitHub Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-copilot-cli)。
+
+使用本地会话打开 `microduck-dev` 工作区，然后输入：
+
+```text
+帮我启动 Microduck Studio 的所有服务。先阅读 AGENTS.md 和 microduck-studio/README.zh-CN.md，
+检查三个同级仓库、Docker、uv，以及 7801 和 8090 端口；然后进入 microduck-studio 运行
+./scripts/dev-stack.sh。等待出现“control probe passed”后，再报告 Studio 地址以及 Studio、
+robotd 和 MuJoCo 的状态。不要启动训练任务，也不要切换或修改兄弟仓库的工作分支。
+```
+
+> 应使用能够访问 Docker 和桌面环境的本地 Agent 会话。云端或后台 Agent 可能运行在另一台
+> 机器上，无法在开发主机上显示原生 MuJoCo Viewer。
 
 ## 快速开始
 
