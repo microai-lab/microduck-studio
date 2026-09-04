@@ -11,7 +11,8 @@ COMPOSE_FILE="$STUDIO_REPO/compose.yaml"
 
 BODY_PORT=${MICRODUCK_BODY_PORT:-7801}
 STUDIO_PORT=${MICRODUCK_STUDIO_PORT:-8090}
-SIM_REF=${MICRODUCK_SIM_REF:-upstream/sim-remote-io}
+SIM_REF=${MICRODUCK_SIM_REF:-sim-remote-io}
+SIM_REPO_URL=${MICRODUCK_SIM_REPO_URL:-https://github.com/pollen-robotics/microduck.git}
 RUST_IMAGE=${MICRODUCK_RUST_IMAGE:-rust:1.89-bookworm}
 ORT_VERSION=${MICRODUCK_ORT_VERSION:-1.28.0}
 ROBOTD_CONTAINER=microduck-studio-robotd
@@ -115,15 +116,41 @@ wait_tcp() {
 }
 
 ensure_sim_source() {
-    commit=$(git -C "$MICRODUCK_REPO" rev-parse "$SIM_REF^{commit}") ||
-        die "missing $SIM_REF; fetch it in the microduck repository"
+    SIM_ARCHIVE_REPO=$MICRODUCK_REPO
+    commit=
+    candidates=$SIM_REF
+    case "$SIM_REF" in
+        */*) ;;
+        *) candidates="$SIM_REF upstream/$SIM_REF origin/$SIM_REF" ;;
+    esac
+    for candidate in $candidates; do
+        if resolved=$(git -C "$MICRODUCK_REPO" rev-parse "$candidate^{commit}" 2>/dev/null); then
+            commit=$resolved
+            break
+        fi
+    done
+
+    if [ -z "$commit" ]; then
+        SIM_ARCHIVE_REPO="$RUNTIME_DIR/sim-runtime.git"
+        if [ ! -d "$SIM_ARCHIVE_REPO" ]; then
+            git init --bare --quiet "$SIM_ARCHIVE_REPO"
+        fi
+        if ! commit=$(git -C "$SIM_ARCHIVE_REPO" rev-parse "refs/heads/$SIM_REF^{commit}" 2>/dev/null); then
+            say "downloading isolated robotd --sim source ($SIM_REF)"
+            git -C "$SIM_ARCHIVE_REPO" fetch --quiet --depth 1 \
+                "$SIM_REPO_URL" "$SIM_REF:refs/heads/$SIM_REF" ||
+                die "could not download $SIM_REF from $SIM_REPO_URL"
+            commit=$(git -C "$SIM_ARCHIVE_REPO" rev-parse "refs/heads/$SIM_REF^{commit}")
+        fi
+    fi
+
     short=$(printf '%s' "$commit" | cut -c1-12)
     SIM_SOURCE="$RUNTIME_DIR/sim-source-$short"
     export SIM_SOURCE
     if [ ! -d "$SIM_SOURCE" ]; then
         say "extracting isolated robotd --sim source ($short)"
         temporary=$(mktemp -d "$RUNTIME_DIR/.sim-source.XXXXXX")
-        git -C "$MICRODUCK_REPO" archive "$commit" | tar -x -C "$temporary"
+        git -C "$SIM_ARCHIVE_REPO" archive "$commit" | tar -x -C "$temporary"
         mv "$temporary" "$SIM_SOURCE"
     fi
     # BuildKit must not send the local Cargo output back into the image build context.
