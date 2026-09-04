@@ -1,131 +1,146 @@
-# Microduck Studio
+<p align="center">
+  <img src="docs/images/microduck-studio-hero-placeholder.png" alt="Microduck Studio 开发工作区预览" width="100%">
+</p>
 
-[English](README.md) | 简体中文
+<h1 align="center">Microduck Studio</h1>
 
-Microduck Studio 是连接 [`microduck`](../microduck) 和
-[`microduck_rl`](../microduck_rl) 的本地开发工具：通过一个浏览器界面集中展示开发状态、
-控制仿真机器人，并安全地编排强化学习冒烟测试。
+<p align="center">一个用于开发、仿真和验证 Microduck 的本地控制台。</p>
 
-它**不会**重新实现机器人运行时或训练环境。它使用 `robotd` 现有的 JSON-RPC 协议，读取
-仿真器身体已有的 TCP 协议，检查两个 Git 仓库，并调用 `microduck_rl` 的正式 CLI 启动训练任务。
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-## 项目关系
+<p align="center">
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="Docker Compose" src="https://img.shields.io/badge/Docker_Compose-2496ED?logo=docker&logoColor=white">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-f2c94c"></a>
+</p>
 
-三者不是包含关系，而是三个独立 Git 项目，关系如下：
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#robotctl-monitor">终端监控</a> ·
+  <a href="#三个项目如何协作">项目架构</a> ·
+  <a href="#页面无法控制机器人时">故障排查</a>
+</p>
 
-```text
-microduck_rl ──训练、导出 ONNX 策略──▶ microduck
-                                          ▲
-                                          │ JSON-RPC 控制与状态
-                                          │
-microduck-studio ──开发、调试、可视化、任务编排
-        │
-        └──调用 microduck_rl 的训练命令、读取训练结果
-```
+<p align="center">
+  <sub>概念预览——这张占位图以后会替换为 Web 界面、<code>robotctl monitor</code> 与 MuJoCo 的真实整合截图。</sub>
+</p>
 
-- `microduck`：机器人运行时。负责 `robotd`、硬件通信、安全控制、加载并执行策略。
-- `microduck_rl`：训练项目。负责 MuJoCo 仿真、强化学习环境、奖励函数、训练及 ONNX 导出。
-- `microduck-studio`：辅助开发工具。它不属于前两个项目，也不提供核心运行或训练逻辑；
-  只是通过现有接口把状态查看、手机控制、训练启动和日志展示集中到 Web 页面。
+Microduck Studio 把现有的
+[`microduck`](https://github.com/pollen-robotics/microduck) 运行时和
+[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl) 仿真/训练项目连接成一套
+基于浏览器的开发流程。它负责呈现状态和安全控制，不会复制机器人安全、策略推理、仿真物理
+或训练逻辑。
 
-因此当前目录结构表达的是“同一个开发工作区中的三个独立仓库”：
+## 快速开始
 
-```text
-microduck-dev/          # 仅作为 Codex 工作区，不是 Git 仓库
-├── microduck/          # 独立仓库
-├── microduck_rl/       # 独立仓库
-└── microduck-studio/   # 独立仓库
-```
+完整的 macOS 开发链路需要 Docker Desktop、`git`、`curl`、Python 3 和
+[`uv`](https://docs.astral.sh/uv/)。请将三个仓库放在同级目录，并先在 `microduck_rl`
+中执行一次 `uv sync`。
 
-严格来说，Studio 与另外两个项目有“工具集成关系”，但没有代码归属或包含关系。
-`microduck` 和 `microduck_rl` 不依赖 Studio，没有 Studio 也能正常开发、训练和运行。
-
-## v0.1 包含的功能
-
-- 支持手机操作的驾驶控件，使用持久 `robotd` 连接，并在松开控件时停止运动。
-- 启用、停止、坐下/站立、翻滚和踢球动作。
-- 实时显示机器人、仿真器、仓库分支及工作区修改状态。
-- 查找 ONNX 文件但不在 Web 进程中加载模型的模型目录。
-- 可选择启用的强化学习冒烟测试启动器。它只构造文档规定的 `uv run train ...` 命令，
-  不接受任意 shell 输入。
-- 在 `.studio-runtime/` 中保存本地任务状态和日志。
-
-## 启动开发链路
-
-### 准备条件
-
-- macOS，且 Docker Desktop 已启动。
-- 宿主机已安装 `git`、`curl`、Python 3 和
-  [`uv`](https://docs.astral.sh/uv/)。
-- `microduck`、`microduck_rl` 和 `microduck-studio` 作为同级目录检出。
-- 先在 `microduck_rl` 中执行一次 `uv sync`，准备 RL 环境。
-
-启动器当前使用 `microduck` 的 `upstream/sim-remote-io` 版本提供仿真后端，
-并将源码展开到隔离的运行目录。它不会修改或切换当前工作区的分支。
-
-### 一键启动
-
-如需在 macOS 上启动完整开发链路——MuJoCo Viewer、加载内置策略且支持仿真的 `robotd`，
-以及 Studio——请先启动 Docker Desktop，然后运行：
+然后在 `microduck-studio` 中运行：
 
 ```bash
-cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
-启动器不会切换任何兄弟仓库的分支。它会在隔离的本地状态中准备上游仿真运行时，先启动
-macOS 原生 MuJoCo Viewer，再通过 Docker Compose 按依赖顺序构建并启动 `robotd` 和 Studio，
-最后执行端到端控制探测。只有 HTTP 移动请求经过 `robotd` 和策略后确实让 MuJoCo 模型产生
-可测位移，脚本才会报告成功；仅 Web 页面可访问不算启动完成。
+打开 **http://127.0.0.1:8090**。该命令会启动原生 MuJoCo Viewer、支持仿真的 `robotd`
+以及 Studio，最后通过移动仿真机器人验证完整控制链路。仅能打开网页不代表已经就绪；请等待：
 
-使用 `./scripts/dev-stack.sh status` 检查状态，使用 `./scripts/dev-stack.sh stop` 仅停止该
-启动器创建的服务。
+```text
+control probe passed: MuJoCo moved ... m
+```
 
-### 常用命令
+> 启动器不会切换兄弟仓库的工作分支。它会把所需的 `upstream/sim-remote-io` 运行时版本
+> 展开到隔离的本地状态目录。
 
-以下命令都在 `microduck-studio` 中执行：
+## 主要能力
+
+| Web 控制 | 实时可见性 | 安全编排 |
+|---|---|---|
+| 适合手机操作的移动、启用/停止、坐下/站起、前滚翻和踢球 | 运行时、仿真器、仓库、策略、任务及连接状态 | Docker Compose 生命周期、端到端控制探测和白名单 RL 冒烟测试 |
+
+运动控制始终使用一个持久 `robotd` 连接。松开控件、隐藏页面、连接断开或 Studio 关闭时
+都会发送 `robot.stop`；`robotd` 始终是最终安全和电机控制权威。
+
+## 日常使用
+
+以下命令都在 `microduck-studio` 中运行：
 
 | 目的 | 命令 |
 |---|---|
-| 启动或重启全部服务，并执行控制探测 | `./scripts/dev-stack.sh` |
+| 启动或干净重启全部服务，并验证控制链路 | `./scripts/dev-stack.sh` |
 | 联合检查 Studio、`robotd` 和 MuJoCo | `./scripts/dev-stack.sh status` |
-| 在当前终端打开 `robotctl` 实时可视化监控 | `./scripts/dev-stack.sh monitor` |
+| 在当前终端打开实时监控 | `./scripts/dev-stack.sh monitor` |
 | 仅停止该开发链路 | `./scripts/dev-stack.sh stop` |
 
-关闭 MuJoCo 窗口会停止该仿真进程，它不会自动重启。需要恢复完整链路时，
-再次执行 `./scripts/dev-stack.sh`。
+关闭 MuJoCo 窗口会停止仿真器，而且不会触发自动重启。再次执行启动命令即可恢复完整链路。
 
-### 打开 `robotctl` 可视化监控
+## `robotctl monitor`
 
-先启动开发链路，然后在同一个 `microduck-studio` 目录中执行启动器命令：
+推荐命令会直接在当前终端打开实时可视化监控：
 
 ```bash
 ./scripts/dev-stack.sh monitor
 ```
 
-如果不经过启动器封装，也可以直接通过 Compose 调用同一个监控程序：
+等价的 Compose 直接命令为：
 
 ```bash
 docker compose run --rm --no-deps --build robotctl monitor
 ```
 
-两条命令都会把监控界面直接连接到当前终端。它们会启动一个一次性的 `robotctl` 工具容器，
-并连接开发链路已有的运行时 socket；它们**不会**打开或进入 Docker Shell。推荐使用启动器
-命令，因为它还会先确认 `robotd` 正在运行。
-
-监控快捷键：
+两种方式都会启动一个一次性的 `robotctl` 工具容器，并连接已有的运行时 socket；它们不会
+进入 Docker Shell 或正在运行的 `robotd` 容器。推荐使用脚本，因为它会先确认 `robotd`
+正在运行。
 
 | 按键 | 动作 |
 |---|---|
-| `q`、`Esc` 或 `Ctrl-C` | 退出监控 |
+| `q`、`Esc` 或 `Ctrl-C` | 退出 |
 | `[` / `]` 或 `Left` / `Right` | 旋转三维机器人视角 |
 | `d` | 显示或隐藏三维机器人视图 |
 
-终端宽度达到 110 列时才会显示三维视图；较窄的终端仍会显示实时状态和关节表格。
+三维视图要求终端至少 110 列宽；较窄的终端仍可显示实时状态和关节表格。
 
-### 容器目录
+## 三个项目如何协作
 
-项目使用的容器定义全部放在本仓库，并按组件隔离：
+当前工作区包含三个独立 Git 仓库：
+
+```text
+microduck_rl
+  MuJoCo 身体 + 训练 + ONNX 导出
+       │ TCP/NDJSON :7801               policy.onnx + manifest
+       ▼                                      │
+microduck 仿真身体 ◀── robotd ────────────────┘
+                         ▲
+                         │ Unix socket 上的 JSON-RPC/NDJSON
+                         │
+                    Microduck Studio ◀── 浏览器
+```
+
+- **microduck** 负责 `robotd`、硬件 I/O、安全、策略加载和电机控制权。
+- **microduck_rl** 负责 MuJoCo 模型、环境、奖励、训练和 ONNX 导出。
+- **microduck-studio** 负责浏览器体验、状态聚合和经过白名单限制的本地编排。
+
+运行时和训练项目都不依赖 Studio；Studio 只使用它们公开的协议和工具。
+
+<details>
+<summary><strong>预期的同级目录结构</strong></summary>
+
+```text
+microduck-dev/          # 仅作为工作区，不是 Git 仓库
+├── microduck/          # 独立仓库
+├── microduck_rl/       # 独立仓库
+└── microduck-studio/   # 独立仓库
+```
+
+</details>
+
+## 容器和进程
+
+项目使用的容器定义全部保存在本仓库，并按组件隔离：
 
 ```text
 docker/
@@ -135,12 +150,11 @@ docker/
 compose.yaml         # robotd、Studio、robotctl 与无窗口 MuJoCo 服务
 ```
 
-启动器统一调用 `docker compose up`、`down` 和 `run`，不使用 `docker run`
-分别启动容器。Docker Desktop 无法直接显示这套 macOS 原生 GUI，因此默认开发
-链路中的 Viewer 仍是宿主机进程；`mujoco-headless` Compose profile 用于
-Linux/CI，不替代默认的 macOS Viewer。
+启动器使用 `docker compose up`、`down` 和 `run`。Docker Desktop 无法直接显示这套
+macOS 原生 GUI，因此默认链路中的 MuJoCo Viewer 仍是宿主机进程。`mujoco-headless`
+profile 用于 Linux/CI，不替代默认的 macOS Viewer。
 
-常用的 Compose 直接命令：
+常用诊断命令：
 
 ```bash
 docker compose ps
@@ -148,14 +162,12 @@ docker compose logs -f studio robotd
 docker compose run --rm --no-deps robotctl health
 ```
 
-健康检查命令会启动一个临时工具容器，让 `robotctl` 连接同一个运行时 socket；
-它不会进入已运行的 `robotd` 容器。交互式监控请参见
-[打开 `robotctl` 可视化监控](#打开-robotctl-可视化监控)。
+最后一条命令会运行临时工具容器，不会打开 Docker Shell。
 
-### 仅启动 MuJoCo Viewer
+<details>
+<summary><strong>仅运行 MuJoCo Viewer</strong></summary>
 
-如果完整链路已占用 7801 端口，请先停止它，然后从同级 RL 仓库直接运行
-仿真器身体：
+如果完整链路已占用 7801 端口，请先停止它，然后从同级 RL 仓库启动仿真器身体：
 
 ```bash
 ./scripts/dev-stack.sh stop
@@ -163,57 +175,59 @@ cd ../microduck_rl
 uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801
 ```
 
-关闭 Viewer 窗口或在该终端按 `Ctrl-C` 即可停止。这种模式只显示模型并提供
-仿真器 TCP 端点，不会启动 `robotd` 或 Studio。
+关闭 Viewer 或按 `Ctrl-C` 即可停止。该模式会提供仿真器 TCP 端点，但不会启动 `robotd`
+或 Studio。
 
-### 联通检查
+</details>
 
-启动命令不只是等待端口打开：它会让一条移动指令经过
-`Web -> Studio -> robotd -> 策略 -> MuJoCo`，并要求仿真器产生可测位移。
-出现 `control probe passed` 表示 Web 控制链路在启动时已经正常。
-
-如果之后点击页面但机器人不动：
-
-1. 执行 `./scripts/dev-stack.sh status`，三行状态都必须在线/健康。
-2. 在 Studio 中确认 `robotd` 和仿真器卡片都显示已连接，然后点击 **启用 RL**。
-3. 检查 `docker compose logs -f studio robotd` 和
-   `.studio-runtime/dev-stack/mujoco.log`，查找断连或策略拒绝信息。
-4. 重新执行 `./scripts/dev-stack.sh`。它会停止上一次启动所属的进程，
-   启动干净链路，并在报告就绪前重新执行端到端控制探测。
-
-如果只需单独运行 Studio，不启动完整仿真控制链路：
+<details>
+<summary><strong>仅运行 Studio</strong></summary>
 
 ```bash
-cd ~/microduck-dev/microduck-studio
 uv sync --extra dev
 cp .env.example .env
 uv run microduck-studio
 ```
 
-在 Mac 上打开 `http://127.0.0.1:8090`；也可以在同一可信 Wi-Fi 网络中的手机上打开
-`http://<mac-lan-ip>:8090`。使用 8090 端口可避免与 `microduck` 的 `mediad` 以及占用
-8080 端口的现有演示页面冲突。
+这只会启动 Web 服务。默认机器人 socket 为 `/run/robotd.sock`；Compose 链路则通过命名
+运行时卷共享该 socket。8090 端口可以避开通常使用 8080 的 `microduck` 服务。
 
-当 Studio 与 `robotd` 在同一环境中运行时，默认的 `/run/robotd.sock` 是合适的配置。
-在 Compose 开发栈中，Studio 与 `robotd` 通过命名运行时卷共享这个 socket。
+</details>
 
-## 训练任务
+## 页面无法控制机器人时
 
-训练启动功能默认关闭，需要明确启用：
+1. 执行 `./scripts/dev-stack.sh status`；Studio、`robotd` 和 MuJoCo 必须全部在线/健康。
+2. 确认 `robotd` 和仿真器卡片都已连接，然后点击 **启用 RL**。
+3. 检查 `docker compose logs -f studio robotd` 和
+   `.studio-runtime/dev-stack/mujoco.log`，查找断连或策略拒绝信息。
+4. 重新执行 `./scripts/dev-stack.sh`。它会停止上次启动所属的进程，并在报告就绪前重新
+   执行端到端控制探测。
+
+## 训练冒烟测试
+
+训练任务默认关闭。在宿主机上直接运行 Studio 时，可以这样启用：
 
 ```bash
 MICRODUCK_STUDIO_ENABLE_JOBS=true uv run microduck-studio
 ```
 
-首个产品化操作是使用 64 个环境、运行 5 次迭代的冒烟测试，与
-`microduck_rl/AGENTS.md` 的要求一致。当前版本不会开放长时间训练任务。
+Studio 只开放文档规定的 64 环境、5 次迭代冒烟测试。它使用 `shell=False` 构造白名单
+`uv run train ...` 参数列表；任意 Shell 命令和长时间训练任务都不会开放。
+
+## 开发
+
+```bash
+uv sync --extra dev
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+```
 
 ## 安全
 
-Studio v0.1 没有身份验证。除非在可信局域网中使用，否则应绑定到 `127.0.0.1`。
-按住控制器时，运动指令会作为连续通知反复发送；松开指针、页面隐藏、连接断开以及
-`robotd` 的 deadman 机制都会停止运动。
+Studio v0.1 没有身份验证。除非处于可信局域网，否则请绑定到 `127.0.0.1`。Studio 只发送
+意图；`robotd` 始终是唯一的安全和电机控制权威。
 
 ## 许可证
 
-Microduck Studio 使用 [MIT 许可证](LICENSE)。
+[MIT](LICENSE)
