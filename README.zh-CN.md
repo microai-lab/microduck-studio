@@ -66,6 +66,8 @@ cd ~/microduck-dev/microduck-studio
 
 使用 `./scripts/dev-stack.sh status` 检查状态，使用 `./scripts/dev-stack.sh stop` 仅停止该
 启动器创建的服务。
+启动器会先停止上一次的 MuJoCo 进程，再启动新进程。手动关闭 Viewer 窗口也会停止
+MuJoCo，并且不会自动重启；再次运行启动器才会重新打开。
 
 如果只需单独运行 Studio，不启动完整仿真控制链路：
 
