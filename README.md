@@ -37,12 +37,58 @@ robot safety, policy inference, simulator physics, or training logic.
 ## Quick start
 
 The complete macOS stack needs Docker Desktop, `git`, `curl`, Python 3, and
-[`uv`](https://docs.astral.sh/uv/). Keep the three repositories as sibling directories and run
-`uv sync` once inside `microduck_rl`.
+[`uv`](https://docs.astral.sh/uv/).
 
-Then, from `microduck-studio`:
+### 1. Download the three repositories
+
+Studio is not standalone: `microduck` supplies `robotd` and its policies, while `microduck_rl`
+supplies the MuJoCo body and Viewer. All three repositories must be sibling directories under one
+workspace:
+
+```text
+microduck-dev/          # workspace only; not a Git repository
+├── microduck/          # robotd, robotctl, policies, and runtime protocol
+├── microduck_rl/       # MuJoCo body, Viewer, environments, and training
+└── microduck-studio/   # Web UI and development-stack orchestration
+```
+
+For a fresh workspace, clone the repositories used by this development setup and register the
+official runtime repository as `upstream`:
 
 ```bash
+mkdir -p ~/microduck-dev
+cd ~/microduck-dev
+
+git clone https://github.com/ttfont/microduck.git
+git clone https://github.com/ttfont/microduck_rl.git
+git clone https://github.com/microai-lab/microduck-studio.git
+
+git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
+git -C microduck fetch upstream sim-remote-io
+```
+
+Download links: [microduck](https://github.com/ttfont/microduck),
+[microduck_rl](https://github.com/ttfont/microduck_rl), and
+[microduck-studio](https://github.com/microai-lab/microduck-studio). The first two are development
+forks of the [official runtime](https://github.com/pollen-robotics/microduck) and
+[official RL repository](https://github.com/pollen-robotics/microduck_rl).
+
+If the repositories already exist, do not clone them again. Confirm the directory layout above and
+make sure `git -C microduck rev-parse upstream/sim-remote-io` succeeds.
+
+### 2. Prepare the RL environment
+
+The native macOS Viewer runs from the `microduck_rl` virtual environment:
+
+```bash
+cd ~/microduck-dev/microduck_rl
+uv sync
+```
+
+### 3. Start and verify everything
+
+```bash
+cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
@@ -129,18 +175,6 @@ microduck simulator body ◀── robotd ──────────┘
   orchestration.
 
 Neither runtime nor training depends on Studio. Studio consumes their public protocols and tools.
-
-<details>
-<summary><strong>Expected sibling directory layout</strong></summary>
-
-```text
-microduck-dev/          # workspace only; not a Git repository
-├── microduck/          # independent repository
-├── microduck_rl/       # independent repository
-└── microduck-studio/   # independent repository
-```
-
-</details>
 
 ## Containers and processes
 

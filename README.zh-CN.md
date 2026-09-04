@@ -37,12 +37,56 @@ Microduck Studio 把现有的
 ## 快速开始
 
 完整的 macOS 开发链路需要 Docker Desktop、`git`、`curl`、Python 3 和
-[`uv`](https://docs.astral.sh/uv/)。请将三个仓库放在同级目录，并先在 `microduck_rl`
-中执行一次 `uv sync`。
+[`uv`](https://docs.astral.sh/uv/)。
 
-然后在 `microduck-studio` 中运行：
+### 1. 下载三个仓库
+
+Studio 不能脱离另外两个项目单独启动完整链路：`microduck` 提供 `robotd` 和策略，
+`microduck_rl` 提供 MuJoCo 身体与 Viewer。三个仓库必须位于同一个工作区的同级目录：
+
+```text
+microduck-dev/          # 仅作为工作区，不是 Git 仓库
+├── microduck/          # robotd、robotctl、策略和运行时协议
+├── microduck_rl/       # MuJoCo 身体、Viewer、环境和训练
+└── microduck-studio/   # Web 界面和开发链路编排
+```
+
+全新安装时，下载当前开发环境使用的三个仓库，并把官方运行时仓库注册为 `upstream`：
 
 ```bash
+mkdir -p ~/microduck-dev
+cd ~/microduck-dev
+
+git clone https://github.com/ttfont/microduck.git
+git clone https://github.com/ttfont/microduck_rl.git
+git clone https://github.com/microai-lab/microduck-studio.git
+
+git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
+git -C microduck fetch upstream sim-remote-io
+```
+
+下载地址：[microduck](https://github.com/ttfont/microduck)、
+[microduck_rl](https://github.com/ttfont/microduck_rl) 和
+[microduck-studio](https://github.com/microai-lab/microduck-studio)。前两个是
+[官方运行时仓库](https://github.com/pollen-robotics/microduck) 和
+[官方 RL 仓库](https://github.com/pollen-robotics/microduck_rl) 的开发分支仓库。
+
+如果仓库已经存在，请不要重复克隆；只需确认目录结构符合上图，并确保
+`git -C microduck rev-parse upstream/sim-remote-io` 能够成功执行。
+
+### 2. 准备 RL 环境
+
+macOS 原生 Viewer 从 `microduck_rl` 的虚拟环境运行：
+
+```bash
+cd ~/microduck-dev/microduck_rl
+uv sync
+```
+
+### 3. 启动并验证完整链路
+
+```bash
+cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
@@ -125,18 +169,6 @@ microduck 仿真身体 ◀── robotd ─────────────�
 - **microduck-studio** 负责浏览器体验、状态聚合和经过白名单限制的本地编排。
 
 运行时和训练项目都不依赖 Studio；Studio 只使用它们公开的协议和工具。
-
-<details>
-<summary><strong>预期的同级目录结构</strong></summary>
-
-```text
-microduck-dev/          # 仅作为工作区，不是 Git 仓库
-├── microduck/          # 独立仓库
-├── microduck_rl/       # 独立仓库
-└── microduck-studio/   # 独立仓库
-```
-
-</details>
 
 ## 容器和进程
 
