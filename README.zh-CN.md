@@ -50,7 +50,20 @@ microduck-dev/          # 仅作为 Codex 工作区，不是 Git 仓库
   不接受任意 shell 输入。
 - 在 `.studio-runtime/` 中保存本地任务状态和日志。
 
-## 运行
+## 启动开发链路
+
+### 准备条件
+
+- macOS，且 Docker Desktop 已启动。
+- 宿主机已安装 `git`、`curl`、Python 3 和
+  [`uv`](https://docs.astral.sh/uv/)。
+- `microduck`、`microduck_rl` 和 `microduck-studio` 作为同级目录检出。
+- 先在 `microduck_rl` 中执行一次 `uv sync`，准备 RL 环境。
+
+启动器当前使用 `microduck` 的 `upstream/sim-remote-io` 版本提供仿真后端，
+并将源码展开到隔离的运行目录。它不会修改或切换当前工作区的分支。
+
+### 一键启动
 
 如需在 macOS 上启动完整开发链路——MuJoCo Viewer、加载内置策略且支持仿真的 `robotd`，
 以及 Studio——请先启动 Docker Desktop，然后运行：
@@ -67,11 +80,22 @@ macOS 原生 MuJoCo Viewer，再通过 Docker Compose 按依赖顺序构建并�
 
 使用 `./scripts/dev-stack.sh status` 检查状态，使用 `./scripts/dev-stack.sh stop` 仅停止该
 启动器创建的服务。
-启动器会先停止上一次的 MuJoCo 进程，再启动新进程。手动关闭 Viewer 窗口也会停止
-MuJoCo，并且不会自动重启；再次运行启动器才会重新打开。
 
-运行 `./scripts/dev-stack.sh monitor` 可在当前终端直接打开 `robotctl` 实时可视化监控。
-按 `q` 退出；终端宽度达到 110 列时还会显示三维机器人视图。
+### 常用命令
+
+以下命令都在 `microduck-studio` 中执行：
+
+| 目的 | 命令 |
+|---|---|
+| 启动或重启全部服务，并执行控制探测 | `./scripts/dev-stack.sh` |
+| 联合检查 Studio、`robotd` 和 MuJoCo | `./scripts/dev-stack.sh status` |
+| 在当前终端打开 `robotctl` 实时可视化监控 | `./scripts/dev-stack.sh monitor` |
+| 仅停止该开发链路 | `./scripts/dev-stack.sh stop` |
+
+按 `q` 退出监控；终端宽度达到 110 列时还会显示三维机器人视图。
+
+关闭 MuJoCo 窗口会停止该仿真进程，它不会自动重启。需要恢复完整链路时，
+再次执行 `./scripts/dev-stack.sh`。
 
 ### 容器目录
 
@@ -85,10 +109,51 @@ docker/
 compose.yaml         # robotd、Studio、robotctl 与无窗口 MuJoCo 服务
 ```
 
-启动器统一调用 `docker compose up`、`down` 和 `run`，不再用 `docker run` 分别启动容器。
-可用 `docker compose ps` 查看容器状态，用 `docker compose logs -f robotd` 查看日志。
-Docker Desktop 无法直接显示这套 macOS 原生 GUI，因此默认开发链路中的 Viewer 仍是宿主机
-进程；`mujoco-headless` Compose profile 用于 Linux/CI，不替代默认的 macOS Viewer。
+启动器统一调用 `docker compose up`、`down` 和 `run`，不使用 `docker run`
+分别启动容器。Docker Desktop 无法直接显示这套 macOS 原生 GUI，因此默认开发
+链路中的 Viewer 仍是宿主机进程；`mujoco-headless` Compose profile 用于
+Linux/CI，不替代默认的 macOS Viewer。
+
+常用的 Compose 直接命令：
+
+```bash
+docker compose ps
+docker compose logs -f studio robotd
+docker compose run --rm --no-deps robotctl health
+docker compose run --rm --no-deps robotctl monitor
+```
+
+最后两条命令会启动一个临时工具容器，让 `robotctl` 连接同一个运行时 socket；
+它们不会进入已运行的 `robotd` 容器。
+
+### 仅启动 MuJoCo Viewer
+
+如果完整链路已占用 7801 端口，请先停止它，然后从同级 RL 仓库直接运行
+仿真器身体：
+
+```bash
+./scripts/dev-stack.sh stop
+cd ../microduck_rl
+uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801
+```
+
+关闭 Viewer 窗口或在该终端按 `Ctrl-C` 即可停止。这种模式只显示模型并提供
+仿真器 TCP 端点，不会启动 `robotd` 或 Studio。
+
+### 联通检查
+
+启动命令不只是等待端口打开：它会让一条移动指令经过
+`Web -> Studio -> robotd -> 策略 -> MuJoCo`，并要求仿真器产生可测位移。
+出现 `control probe passed` 表示 Web 控制链路在启动时已经正常。
+
+如果之后点击页面但机器人不动：
+
+1. 执行 `./scripts/dev-stack.sh status`，三行状态都必须在线/健康。
+2. 在 Studio 中确认 `robotd` 和仿真器卡片都显示已连接，然后点击 **启用 RL**。
+3. 检查 `docker compose logs -f studio robotd` 和
+   `.studio-runtime/dev-stack/mujoco.log`，查找断连或策略拒绝信息。
+4. 重新执行 `./scripts/dev-stack.sh`。它会停止上一次启动所属的进程，
+   启动干净链路，并在报告就绪前重新执行端到端控制探测。
 
 如果只需单独运行 Studio，不启动完整仿真控制链路：
 
