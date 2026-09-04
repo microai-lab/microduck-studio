@@ -1,141 +1,150 @@
-# Microduck Studio
+<p align="center">
+  <img src="docs/images/microduck-studio-hero-placeholder.png" alt="Microduck Studio development workspace preview" width="100%">
+</p>
 
-English | [简体中文](README.zh-CN.md)
+<h1 align="center">Microduck Studio</h1>
 
-Microduck Studio is the missing local product between
-[`microduck`](../microduck) and [`microduck_rl`](../microduck_rl): one browser UI for development
-status, simulated-robot control, and safe RL smoke-test orchestration.
+<p align="center">A local control room for developing, simulating, and validating Microduck.</p>
 
-It does **not** reimplement the robot runtime or training environments. It speaks `robotd`'s
-existing JSON-RPC protocol, reads the simulator body's existing TCP protocol, inspects both Git
-repositories, and invokes the official `microduck_rl` CLI for training jobs.
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-## Project relationships
+<p align="center">
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="Docker Compose" src="https://img.shields.io/badge/Docker_Compose-2496ED?logo=docker&logoColor=white">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-f2c94c"></a>
+</p>
 
-These are three independent Git projects, not projects nested inside one another:
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#robotctl-monitor">Monitor</a> ·
+  <a href="#how-the-projects-fit-together">Architecture</a> ·
+  <a href="#when-the-page-does-not-move-the-robot">Troubleshooting</a>
+</p>
 
-```text
-microduck_rl ──train and export ONNX policies──▶ microduck
-                                                    ▲
-                                                    │ JSON-RPC control and status
-                                                    │
-microduck-studio ──development, debugging, visualization, and orchestration
-        │
-        └──invokes microduck_rl training commands and reads training results
-```
+<p align="center">
+  <sub>Concept preview — this placeholder will later be replaced by one real composite of the Web UI, <code>robotctl monitor</code>, and MuJoCo.</sub>
+</p>
 
-- `microduck` is the robot runtime. It owns `robotd`, hardware communication, safety control, and
-  policy loading and execution.
-- `microduck_rl` is the training project. It owns MuJoCo simulation, reinforcement-learning
-  environments, reward functions, training, and ONNX export.
-- `microduck-studio` is a supporting development tool. It is not part of either sibling and does
-  not provide core runtime or training logic. It uses their existing interfaces to bring status,
-  phone controls, training launches, and logs together in one web UI.
+Microduck Studio connects the existing
+[`microduck`](https://github.com/pollen-robotics/microduck) runtime and
+[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl) simulation/training project in
+one browser-based development workflow. It presents status and safe control; it does not duplicate
+robot safety, policy inference, simulator physics, or training logic.
 
-The directory layout therefore represents three independent repositories in one development
-workspace:
+## Quick start
 
-```text
-microduck-dev/          # Codex workspace only; not a Git repository
-├── microduck/          # independent repository
-├── microduck_rl/       # independent repository
-└── microduck-studio/   # independent repository
-```
+The complete macOS stack needs Docker Desktop, `git`, `curl`, Python 3, and
+[`uv`](https://docs.astral.sh/uv/). Keep the three repositories as sibling directories and run
+`uv sync` once inside `microduck_rl`.
 
-Strictly speaking, Studio has a tooling-integration relationship with the other two projects, not
-a code-ownership or containment relationship. Neither `microduck` nor `microduck_rl` depends on
-Studio; development, training, and robot operation continue to work without it.
-
-## Included in v0.1
-
-- Phone-friendly drive controls with a persistent `robotd` connection and release-to-stop safety.
-- Enable, stop, sit/stand, roulade, and kick actions.
-- Live robot, simulator, repository branch, and dirty-worktree status.
-- A model catalog that finds ONNX artifacts without loading them into the web process.
-- An opt-in RL smoke-test launcher. It only builds the documented `uv run train ...` command and
-  never accepts arbitrary shell input.
-- Local job status and logs under `.studio-runtime/`.
-
-## Run the development stack
-
-### Prerequisites
-
-- macOS with Docker Desktop running.
-- `git`, `curl`, Python 3, and [`uv`](https://docs.astral.sh/uv/) available on the host.
-- `microduck`, `microduck_rl`, and `microduck-studio` checked out as sibling directories.
-- The RL environment prepared once with `uv sync` from `microduck_rl`.
-
-The launcher currently uses the `upstream/sim-remote-io` revision of `microduck` for the
-simulation backend, in an isolated runtime directory. It does not modify or switch the branch in
-your working checkout.
-
-### One-command startup
-
-For the complete macOS development stack—MuJoCo Viewer, a simulation-enabled `robotd` with the
-bundled policies, and Studio—start Docker Desktop and run:
+Then, from `microduck-studio`:
 
 ```bash
-cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
-The launcher does not switch either sibling repository's branch. It prepares the upstream
-simulation runtime in isolated local state, starts the native macOS MuJoCo Viewer, and uses Docker
-Compose to build and start `robotd` and Studio in dependency order. It finishes with an end-to-end
-control probe. Success means an HTTP move request travelled through `robotd` and its policy and
-measurably moved the MuJoCo body; a merely reachable web page is not considered ready.
+Open **http://127.0.0.1:8090**. The command starts the native MuJoCo Viewer, a simulation-enabled
+`robotd`, and Studio, then proves the complete control path by moving the simulated robot. Do not
+treat a reachable page alone as ready; wait for:
 
-Use `./scripts/dev-stack.sh status` to check it and `./scripts/dev-stack.sh stop` to stop only the
-services created by the launcher.
+```text
+control probe passed: MuJoCo moved ... m
+```
 
-### Daily commands
+> The launcher never switches a sibling repository's working branch. It extracts the required
+> `upstream/sim-remote-io` runtime revision into isolated local state.
 
-Run these from `microduck-studio`:
+## What you get
+
+| Web control | Live visibility | Safe orchestration |
+|---|---|---|
+| Phone-friendly movement, enable/stop, sit/stand, roulade, and kicks | Runtime, simulator, repository, job, and connection status, plus model discovery | Docker Compose lifecycle, an end-to-end control probe, and allowlisted RL smoke tests |
+
+Motion uses one persistent `robotd` connection. Releasing a control, hiding the page, disconnecting,
+or shutting Studio down sends `robot.stop`; `robotd` remains the final safety and motor authority.
+
+## Daily workflow
+
+Run these commands from `microduck-studio`:
 
 | Goal | Command |
 |---|---|
-| Start or restart everything and run the control probe | `./scripts/dev-stack.sh` |
+| Start or cleanly restart everything and verify control | `./scripts/dev-stack.sh` |
 | Check Studio, `robotd`, and MuJoCo together | `./scripts/dev-stack.sh status` |
-| Open the live `robotctl` visual monitor in this terminal | `./scripts/dev-stack.sh monitor` |
+| Open the live terminal monitor | `./scripts/dev-stack.sh monitor` |
 | Stop only this development stack | `./scripts/dev-stack.sh stop` |
 
-Closing the MuJoCo window stops that simulator process. It is not automatically restarted; run
-`./scripts/dev-stack.sh` again when you want the complete stack back.
+Closing the MuJoCo window stops the simulator and does not trigger an automatic restart. Run the
+start command again to restore the complete stack.
 
-### Open the `robotctl` visual monitor
+## `robotctl monitor`
 
-Start the development stack first, then use the launcher from the same `microduck-studio`
-directory:
+The recommended command opens the live visual monitor directly in the current terminal:
 
 ```bash
 ./scripts/dev-stack.sh monitor
 ```
 
-To invoke the same monitor directly through Compose, without the launcher wrapper:
+The direct Compose equivalent is:
 
 ```bash
 docker compose run --rm --no-deps --build robotctl monitor
 ```
 
-Both commands attach the monitor to the current terminal. They start a disposable `robotctl` tool
-container connected to the development stack's existing runtime socket; they do **not** open or
-enter a Docker shell. The wrapper form is preferred because it also checks that `robotd` is
-running.
-
-Monitor keys:
+Both launch a disposable `robotctl` tool container attached to the existing runtime socket. They do
+not enter a Docker shell or the running `robotd` container. The wrapper is preferred because it
+first verifies that `robotd` is running.
 
 | Key | Action |
 |---|---|
-| `q`, `Esc`, or `Ctrl-C` | Exit the monitor |
+| `q`, `Esc`, or `Ctrl-C` | Exit |
 | `[` / `]` or `Left` / `Right` | Rotate the 3D robot view |
 | `d` | Show or hide the 3D robot view |
 
-Use a terminal at least 110 columns wide for the 3D view. A narrower terminal continues to show
-the live status and joint tables.
+The 3D view needs a terminal at least 110 columns wide. Status and joint tables still work in a
+narrower terminal.
 
-### Container layout
+## How the projects fit together
 
-All project-owned container definitions live in this repository and are isolated by component:
+The workspace contains three independent Git repositories:
+
+```text
+microduck_rl
+  MuJoCo body + training + ONNX export
+       │ TCP/NDJSON :7801               policy.onnx + manifest
+       ▼                                      │
+microduck simulator body ◀── robotd ──────────┘
+                              ▲
+                              │ JSON-RPC/NDJSON over a Unix socket
+                              │
+                         Microduck Studio ◀── Browser
+```
+
+- **microduck** owns `robotd`, hardware I/O, safety, policy loading, and motor authority.
+- **microduck_rl** owns MuJoCo models, environments, rewards, training, and ONNX export.
+- **microduck-studio** owns the browser experience, status aggregation, and allowlisted local
+  orchestration.
+
+Neither runtime nor training depends on Studio. Studio consumes their public protocols and tools.
+
+<details>
+<summary><strong>Expected sibling directory layout</strong></summary>
+
+```text
+microduck-dev/          # workspace only; not a Git repository
+├── microduck/          # independent repository
+├── microduck_rl/       # independent repository
+└── microduck-studio/   # independent repository
+```
+
+</details>
+
+## Containers and processes
+
+All project-owned container definitions live here and are separated by component:
 
 ```text
 docker/
@@ -145,12 +154,11 @@ docker/
 compose.yaml         # robotd, Studio, robotctl, and headless MuJoCo services
 ```
 
-The launcher invokes `docker compose up`, `down`, and `run`; it does not start individual
-containers with `docker run`. The macOS Viewer remains a native process because Docker Desktop
-cannot display that native GUI directly. The `mujoco-headless` Compose profile exists for Linux/CI
-use and does not replace the Viewer in the default macOS stack.
+The launcher uses `docker compose up`, `down`, and `run`. On macOS, MuJoCo Viewer remains a
+native host process because Docker Desktop cannot display that GUI directly. The
+`mujoco-headless` profile is for Linux/CI and does not replace the default macOS Viewer.
 
-Useful direct Compose commands:
+Useful diagnostics:
 
 ```bash
 docker compose ps
@@ -158,14 +166,13 @@ docker compose logs -f studio robotd
 docker compose run --rm --no-deps robotctl health
 ```
 
-The health command runs `robotctl` in a temporary tool container attached to the same runtime
-socket. It does not enter the already-running `robotd` container. See
-[Open the `robotctl` visual monitor](#open-the-robotctl-visual-monitor) for the interactive monitor.
+The final command runs a temporary tool container; it does not open a Docker shell.
 
-### Run only the MuJoCo Viewer
+<details>
+<summary><strong>Run only MuJoCo Viewer</strong></summary>
 
-Stop the complete stack first if it already owns port 7801, then run the simulator body directly
-from the sibling RL repository:
+Stop the full stack first if it owns port 7801, then start the simulator body from the sibling RL
+repository:
 
 ```bash
 ./scripts/dev-stack.sh stop
@@ -173,57 +180,61 @@ cd ../microduck_rl
 uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801
 ```
 
-Close the Viewer window or press `Ctrl-C` in that terminal to stop it. This mode shows the model
-and exposes the simulator TCP endpoint, but it does not start `robotd` or Studio.
+Close the Viewer or press `Ctrl-C` to stop it. This mode exposes the simulator TCP endpoint but
+does not start `robotd` or Studio.
 
-### Connectivity checks
+</details>
 
-The startup command does more than wait for open ports: it sends a move through
-`Web -> Studio -> robotd -> policy -> MuJoCo` and requires measurable simulator displacement. If
-it prints `control probe passed`, the web control path was working at startup.
-
-If a later click produces no movement:
-
-1. Run `./scripts/dev-stack.sh status`; all three lines must be online/healthy.
-2. In Studio, confirm the `robotd` and simulator cards are connected, then click **Enable RL**.
-3. Inspect `docker compose logs -f studio robotd` and
-   `.studio-runtime/dev-stack/mujoco.log` for a disconnect or policy refusal.
-4. Run `./scripts/dev-stack.sh` again. It stops the processes owned by the previous launch, starts
-   a clean stack, and repeats the end-to-end control probe before reporting ready.
-
-To run Studio without the complete simulator control chain:
+<details>
+<summary><strong>Run only Studio</strong></summary>
 
 ```bash
-cd ~/microduck-dev/microduck-studio
 uv sync --extra dev
 cp .env.example .env
 uv run microduck-studio
 ```
 
-Open `http://127.0.0.1:8090` on the Mac, or `http://<mac-lan-ip>:8090` from a phone on the same
-trusted Wi-Fi. Port 8090 avoids colliding with `microduck`'s `mediad` and the existing demo page
-on port 8080.
+This starts only the Web service. The default robot socket is `/run/robotd.sock`; the Compose
+stack instead shares that socket through its named runtime volume. Port 8090 avoids `microduck`
+services that commonly use port 8080.
 
-The default `/run/robotd.sock` is appropriate when Studio runs beside `robotd`. In the Compose
-stack, Studio and `robotd` share a named runtime volume containing that socket.
+</details>
 
-## Training jobs
+## When the page does not move the robot
 
-Training launches are disabled by default. Enable them deliberately:
+1. Run `./scripts/dev-stack.sh status`; Studio, `robotd`, and MuJoCo must all be online/healthy.
+2. Confirm the `robotd` and simulator cards are connected, then click **Enable RL**.
+3. Check `docker compose logs -f studio robotd` and
+   `.studio-runtime/dev-stack/mujoco.log` for disconnects or policy refusals.
+4. Run `./scripts/dev-stack.sh` again. It stops processes owned by the prior launch and repeats the
+   end-to-end control probe before reporting ready.
+
+## Training smoke tests
+
+Training jobs are disabled by default. When running Studio directly on the host, enable them with:
 
 ```bash
 MICRODUCK_STUDIO_ENABLE_JOBS=true uv run microduck-studio
 ```
 
-The first productized action is a 64-environment, 5-iteration smoke test, matching
-`microduck_rl/AGENTS.md`. Long training runs are intentionally not exposed yet.
+Studio exposes only the documented 64-environment, 5-iteration smoke test. It constructs an
+allowlisted `uv run train ...` argument list with `shell=False`; arbitrary shell commands and
+long training runs are intentionally unavailable.
+
+## Development
+
+```bash
+uv sync --extra dev
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+```
 
 ## Safety
 
-Studio has no authentication in v0.1. Bind to `127.0.0.1` unless using a trusted LAN. Motion is a
-continuous notification refreshed while a control is held; pointer release, page hide, connection
-loss, and `robotd`'s deadman all stop it.
+Studio v0.1 has no authentication. Bind it to `127.0.0.1` unless you are on a trusted LAN. Studio
+sends intents only; `robotd` remains the sole safety and motor authority.
 
 ## License
 
-Microduck Studio is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)
