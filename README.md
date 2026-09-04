@@ -73,6 +73,8 @@ policy and measurably moved the MuJoCo body; a merely reachable web page is not 
 
 Use `./scripts/dev-stack.sh status` to check it and `./scripts/dev-stack.sh stop` to stop only the
 services created by the launcher.
+The launcher stops an earlier MuJoCo process before starting a new one. Closing the Viewer window
+manually also stops MuJoCo, and it remains closed until the launcher is run again.
 
 To run Studio without the complete simulator control chain:
 

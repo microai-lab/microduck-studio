@@ -22,6 +22,8 @@ RPC_CONTAINER=microduck-studio-rpc-bridge
 HOST_SOCKET=/tmp/microduck-studio-robotd.sock
 HOST_BRIDGE_SCRIPT=/tmp/microduck-studio-rpc-bridge.py
 HOST_STUDIO_SCRIPT=/tmp/microduck-studio-run-web.sh
+BODY_PID_FILE="$RUNTIME_DIR/mujoco.pid"
+BODY_PLIST="$RUNTIME_DIR/mujoco.plist"
 
 BODY_LABEL=com.microduck.mujoco.viewer
 SOCKET_LABEL=com.microduck.studio.socketbridge
@@ -44,11 +46,43 @@ remove_container() {
     docker container inspect "$1" >/dev/null 2>&1 && docker rm -f "$1" >/dev/null || true
 }
 
+body_pid() {
+    [ -f "$BODY_PID_FILE" ] || return 1
+    pid=$(sed -n '1p' "$BODY_PID_FILE")
+    case "$pid" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    command=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+    case "$command" in
+        *mjlab_microduck.sim.body_server*) printf '%s\n' "$pid" ;;
+        *) return 1 ;;
+    esac
+}
+
+stop_body() {
+    # Remove jobs created by older launcher versions before switching to PID ownership.
+    remove_label "$BODY_LABEL"
+    pid=$(body_pid) || pid=
+    if [ -n "$pid" ]; then
+        kill "$pid" 2>/dev/null || true
+        attempts=0
+        while kill -0 "$pid" 2>/dev/null && [ "$attempts" -lt 40 ]; do
+            attempts=$((attempts + 1))
+            sleep 0.1
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$BODY_PID_FILE"
+    rm -f "$BODY_PLIST"
+}
+
 stop_stack() {
     say "stopping Studio development stack"
     remove_label "$WEB_LABEL"
     remove_label "$SOCKET_LABEL"
-    remove_label "$BODY_LABEL"
+    stop_body
     remove_container "$RPC_CONTAINER"
     remove_container "$ROBOTD_CONTAINER"
     rm -f "$HOST_SOCKET" "$HOST_BRIDGE_SCRIPT" "$HOST_STUDIO_SCRIPT"
@@ -168,11 +202,35 @@ EOF
 
 start_body() {
     say "starting MuJoCo body and Viewer"
-    launchctl submit -l "$BODY_LABEL" \
-        -o "$RUNTIME_DIR/mujoco.log" -e "$RUNTIME_DIR/mujoco.log" -- \
+    python3 -c '
+import plistlib, sys
+
+path, label, python, mjpython, port, log = sys.argv[1:]
+config = {
+    "Label": label,
+    "ProgramArguments": [
+        python,
+        mjpython,
+        "-m",
+        "mjlab_microduck.sim.body_server",
+        "--keyframe",
+        "HOME",
+        "--port",
+        port,
+    ],
+    "RunAtLoad": True,
+    "KeepAlive": False,
+    "ProcessType": "Interactive",
+    "StandardOutPath": log,
+    "StandardErrorPath": log,
+}
+with open(path, "wb") as output:
+    plistlib.dump(config, output)
+' "$BODY_PLIST" "$BODY_LABEL" \
         "$MICRODUCK_RL_REPO/.venv/bin/python" \
         "$MICRODUCK_RL_REPO/.venv/bin/mjpython" \
-        -m mjlab_microduck.sim.body_server --keyframe HOME --port "$BODY_PORT"
+        "$BODY_PORT" "$RUNTIME_DIR/mujoco.log"
+    launchctl bootstrap "$DOMAIN" "$BODY_PLIST"
     wait_tcp 127.0.0.1 "$BODY_PORT" "MuJoCo body"
 }
 
