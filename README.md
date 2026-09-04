@@ -58,8 +58,26 @@ Studio; development, training, and robot operation continue to work without it.
 
 ## Run
 
+For the complete macOS development stack—MuJoCo Viewer, a simulation-enabled `robotd` with the
+bundled policies, and Studio—start Docker Desktop and run:
+
 ```bash
-cd ~/Documents/coding/gh/microduck-dev/microduck-studio
+cd ~/microduck-dev/microduck-studio
+./scripts/dev-stack.sh
+```
+
+The launcher does not switch either sibling repository's branch. It builds the upstream simulator
+runtime in isolated local state, starts every service in dependency order, and finishes with an
+end-to-end control probe. Success means an HTTP move request travelled through `robotd` and its
+policy and measurably moved the MuJoCo body; a merely reachable web page is not considered ready.
+
+Use `./scripts/dev-stack.sh status` to check it and `./scripts/dev-stack.sh stop` to stop only the
+services created by the launcher.
+
+To run Studio without the complete simulator control chain:
+
+```bash
+cd ~/microduck-dev/microduck-studio
 uv sync --extra dev
 cp .env.example .env
 uv run microduck-studio
@@ -69,8 +87,8 @@ Open `http://127.0.0.1:8090` on the Mac, or `http://<mac-lan-ip>:8090` from a ph
 trusted Wi-Fi. Port 8090 avoids colliding with `microduck`'s `mediad` and the existing demo page
 on port 8080.
 
-The default `/run/robotd.sock` is appropriate when Studio runs beside `robotd`. For the current
-Docker demo, bind-mount or forward the socket and set `MICRODUCK_ROBOTD_SOCKET` to that path.
+The default `/run/robotd.sock` is appropriate when Studio runs beside `robotd`. The complete-stack
+launcher creates and configures its Docker-to-host socket bridge automatically.
 
 ## Training jobs
 
