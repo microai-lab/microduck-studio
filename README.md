@@ -66,10 +66,11 @@ cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
-The launcher does not switch either sibling repository's branch. It builds the upstream simulator
-runtime in isolated local state, starts every service in dependency order, and finishes with an
-end-to-end control probe. Success means an HTTP move request travelled through `robotd` and its
-policy and measurably moved the MuJoCo body; a merely reachable web page is not considered ready.
+The launcher does not switch either sibling repository's branch. It prepares the upstream
+simulation runtime in isolated local state, starts the native macOS MuJoCo Viewer, and uses Docker
+Compose to build and start `robotd` and Studio in dependency order. It finishes with an end-to-end
+control probe. Success means an HTTP move request travelled through `robotd` and its policy and
+measurably moved the MuJoCo body; a merely reachable web page is not considered ready.
 
 Use `./scripts/dev-stack.sh status` to check it and `./scripts/dev-stack.sh stop` to stop only the
 services created by the launcher.
@@ -79,6 +80,24 @@ manually also stops MuJoCo, and it remains closed until the launcher is run agai
 Run `./scripts/dev-stack.sh monitor` to open `robotctl`'s live visual monitor directly in the
 current terminal. Press `q` to exit it; a terminal at least 110 columns wide also shows the 3D
 robot view.
+
+### Container layout
+
+All project-owned container definitions live in this repository and are isolated by component:
+
+```text
+docker/
+├── microduck/       # robotd + robotctl runtime image
+├── microduck-rl/    # optional Linux/headless MuJoCo image
+└── studio/          # Studio web image
+compose.yaml         # robotd, Studio, robotctl, and headless MuJoCo services
+```
+
+The launcher invokes `docker compose up`, `down`, and `run`; it no longer starts individual
+containers with `docker run`. Use `docker compose ps` and `docker compose logs -f robotd` for
+container status and logs. The macOS Viewer remains a native process because Docker Desktop cannot
+display that native GUI directly. The `mujoco-headless` Compose profile exists for Linux/CI use and
+does not replace the Viewer in the default macOS stack.
 
 To run Studio without the complete simulator control chain:
 
@@ -93,8 +112,8 @@ Open `http://127.0.0.1:8090` on the Mac, or `http://<mac-lan-ip>:8090` from a ph
 trusted Wi-Fi. Port 8090 avoids colliding with `microduck`'s `mediad` and the existing demo page
 on port 8080.
 
-The default `/run/robotd.sock` is appropriate when Studio runs beside `robotd`. The complete-stack
-launcher creates and configures its Docker-to-host socket bridge automatically.
+The default `/run/robotd.sock` is appropriate when Studio runs beside `robotd`. In the Compose
+stack, Studio and `robotd` share a named runtime volume containing that socket.
 
 ## Training jobs
 

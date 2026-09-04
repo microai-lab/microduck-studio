@@ -1,0 +1,7 @@
+.git
+.venv
+.pytest_cache
+.ruff_cache
+.studio-runtime
+__pycache__
+*.pyc
