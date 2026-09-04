@@ -52,8 +52,25 @@ microduck-dev/          # 仅作为 Codex 工作区，不是 Git 仓库
 
 ## 运行
 
+如需在 macOS 上启动完整开发链路——MuJoCo Viewer、加载内置策略且支持仿真的 `robotd`，
+以及 Studio——请先启动 Docker Desktop，然后运行：
+
 ```bash
-cd ~/Documents/coding/gh/microduck-dev/microduck-studio
+cd ~/microduck-dev/microduck-studio
+./scripts/dev-stack.sh
+```
+
+启动器不会切换任何兄弟仓库的分支。它会在隔离的本地状态中构建上游仿真运行时，按依赖顺序
+启动所有服务，并在最后执行端到端控制探测。只有 HTTP 移动请求经过 `robotd` 和策略后确实
+让 MuJoCo 模型产生可测位移，脚本才会报告成功；仅 Web 页面可访问不算启动完成。
+
+使用 `./scripts/dev-stack.sh status` 检查状态，使用 `./scripts/dev-stack.sh stop` 仅停止该
+启动器创建的服务。
+
+如果只需单独运行 Studio，不启动完整仿真控制链路：
+
+```bash
+cd ~/microduck-dev/microduck-studio
 uv sync --extra dev
 cp .env.example .env
 uv run microduck-studio
@@ -64,8 +81,7 @@ uv run microduck-studio
 8080 端口的现有演示页面冲突。
 
 当 Studio 与 `robotd` 在同一环境中运行时，默认的 `/run/robotd.sock` 是合适的配置。
-对于当前 Docker 演示，需要挂载或转发该 socket，并将 `MICRODUCK_ROBOTD_SOCKET` 设置为
-对应路径。
+完整链路启动器会自动创建并配置 Docker 到宿主机的 socket 转发。
 
 ## 训练任务
 
