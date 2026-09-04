@@ -332,7 +332,7 @@ need python3
 [ "$(uname -s)" = Darwin ] || die "this launcher currently supports macOS only"
 [ -d "$MICRODUCK_REPO/.git" ] || die "microduck sibling repository is missing"
 [ -f "$MICRODUCK_RL_REPO/.venv/bin/mjpython" ] || die "run 'uv sync' in microduck_rl first"
-docker info >/dev/null 2>&1 || die "Docker Desktop is not running"
+docker info >/dev/null 2>&1 || die "Docker is not running or is not reachable"
 mkdir -p "$RUNTIME_DIR/jobs"
 ensure_sim_source
 ensure_runtime_volume

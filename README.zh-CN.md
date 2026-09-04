@@ -36,8 +36,11 @@ Microduck Studio 把现有的
 
 ## 快速开始
 
-完整的 macOS 开发链路需要 Docker Desktop、`git`、`curl`、Python 3 和
-[`uv`](https://docs.astral.sh/uv/)。
+当前一键联合启动需要可用的 Docker（含 Docker Compose）、`git`、`curl`、Python 3 和
+[`uv`](https://docs.astral.sh/uv/)。macOS 可以使用 Docker Desktop，也可以使用其他兼容的
+Docker 运行环境；项目本身并不强制依赖 Docker，各组件也可以分别在宿主机运行。这里使用
+Docker 是为了隔离 `robotd` 与 Studio Web 的构建和运行环境，你当前的一键启动方案仍采用
+这种方式。
 
 ### 1. 下载三个仓库
 
@@ -68,10 +71,21 @@ git clone https://github.com/microai-lab/microduck-studio.git
 [官方运行时仓库](https://github.com/pollen-robotics/microduck) 和
 [官方 RL 仓库](https://github.com/pollen-robotics/microduck_rl) 的开发分支仓库。
 
-如果仓库已经存在，请不要重复克隆，只需确认目录结构符合上图。首次启动时，如果本地没有
-对应版本，Studio 会自动把官方 `sim-remote-io` 运行时源码下载到
-`.studio-runtime/dev-stack/sim-runtime.git`。它不会给 `microduck` 添加 remote、切换分支
-或修改工作区文件。
+如果仓库已经存在，请不要重复克隆，只需确认目录结构符合上图。完整的 MuJoCo 联调还需要
+官方 `microduck` 的 `sim-remote-io` 分支：当前常规运行时分支没有 `robotd --sim` 后端，
+而该分支提供连接 MuJoCo 身体服务（默认 TCP `127.0.0.1:7801`）的远程 `RobotIo` 实现。
+首次准备工作区时执行：
+
+```bash
+git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
+git -C microduck fetch upstream sim-remote-io
+```
+
+`remote add` 只需执行一次；如果已经存在 `upstream`，只执行第二条即可。这些命令只添加仓库
+地址并下载分支，不会切换 `microduck` 的当前分支。启动器会读取
+`upstream/sim-remote-io` 并把源码展开到 Studio 的隔离状态目录；如果没有提前获取，它也会
+自动把该分支下载到 `.studio-runtime/dev-stack/sim-runtime.git`，不会修改兄弟仓库的分支
+或工作区文件。
 
 ### 2. 准备 RL 环境
 
@@ -181,9 +195,10 @@ docker/
 compose.yaml         # robotd、Studio、robotctl 与无窗口 MuJoCo 服务
 ```
 
-启动器使用 `docker compose up`、`down` 和 `run`。Docker Desktop 无法直接显示这套
-macOS 原生 GUI，因此默认链路中的 MuJoCo Viewer 仍是宿主机进程。`mujoco-headless`
-profile 用于 Linux/CI，不替代默认的 macOS Viewer。
+一键启动器使用 `docker compose up`、`down` 和 `run` 隔离 `robotd` 与 Studio Web；因此
+使用该脚本时仍需启动 Docker。Docker 不是各组件单独运行的硬性依赖。Docker 容器无法直接
+显示这套 macOS 原生 GUI，因此默认链路中的 MuJoCo Viewer 仍是宿主机进程。
+`mujoco-headless` profile 用于 Linux/CI，不替代默认的 macOS Viewer。
 
 常用诊断命令：
 
