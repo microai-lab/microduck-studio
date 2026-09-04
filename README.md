@@ -36,8 +36,11 @@ robot safety, policy inference, simulator physics, or training logic.
 
 ## Quick start
 
-The complete macOS stack needs Docker Desktop, `git`, `curl`, Python 3, and
-[`uv`](https://docs.astral.sh/uv/).
+The current one-command stack needs Docker with Docker Compose, `git`, `curl`, Python 3, and
+[`uv`](https://docs.astral.sh/uv/). On macOS, Docker Desktop is one option, but any compatible
+Docker runtime is suitable. Docker is not a hard dependency of the individual projects, which can
+also run directly on the host. This workflow uses it to isolate the `robotd` and Studio Web build
+and runtime environments, and the current launcher still relies on that isolation.
 
 ### 1. Download the three repositories
 
@@ -70,9 +73,22 @@ forks of the [official runtime](https://github.com/pollen-robotics/microduck) an
 [official RL repository](https://github.com/pollen-robotics/microduck_rl).
 
 If the repositories already exist, do not clone them again; just confirm the directory layout
-above. On first launch, Studio automatically downloads the official `sim-remote-io` runtime source
-into `.studio-runtime/dev-stack/sim-runtime.git` when it is not already available locally. It does
-not add a remote to `microduck`, switch its branch, or change its working tree.
+above. Full MuJoCo integration also needs the official `microduck` `sim-remote-io` branch. The
+regular runtime branch in this setup does not provide the `robotd --sim` backend; `sim-remote-io`
+provides the remote `RobotIo` implementation that connects `robotd` to the MuJoCo body service on
+TCP `127.0.0.1:7801` by default. Prepare it once from the workspace directory:
+
+```bash
+git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
+git -C microduck fetch upstream sim-remote-io
+```
+
+Run `remote add` only once; if `upstream` already exists, run only the second command. These
+commands add the repository address and download the branch; they do not switch the current
+`microduck` branch. The launcher reads `upstream/sim-remote-io` and extracts it into isolated Studio
+state. If it was not fetched in advance, the launcher can also download it automatically into
+`.studio-runtime/dev-stack/sim-runtime.git` without changing the sibling repository's branch or
+working tree.
 
 ### 2. Prepare the RL environment
 
@@ -186,9 +202,11 @@ docker/
 compose.yaml         # robotd, Studio, robotctl, and headless MuJoCo services
 ```
 
-The launcher uses `docker compose up`, `down`, and `run`. On macOS, MuJoCo Viewer remains a
-native host process because Docker Desktop cannot display that GUI directly. The
-`mujoco-headless` profile is for Linux/CI and does not replace the default macOS Viewer.
+The one-command launcher uses `docker compose up`, `down`, and `run` to isolate `robotd` and Studio
+Web, so Docker must be running when that script is used. Docker is not mandatory when the
+components are run separately. Containers cannot display this native macOS GUI directly, so the
+default MuJoCo Viewer remains a host process. The `mujoco-headless` profile is for Linux/CI and does
+not replace the default macOS Viewer.
 
 Useful diagnostics:
 
