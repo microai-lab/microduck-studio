@@ -76,6 +76,10 @@ services created by the launcher.
 The launcher stops an earlier MuJoCo process before starting a new one. Closing the Viewer window
 manually also stops MuJoCo, and it remains closed until the launcher is run again.
 
+Run `./scripts/dev-stack.sh monitor` to open `robotctl`'s live visual monitor directly in the
+current terminal. Press `q` to exit it; a terminal at least 110 columns wide also shows the 3D
+robot view.
+
 To run Studio without the complete simulator control chain:
 
 ```bash

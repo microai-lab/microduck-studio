@@ -69,6 +69,9 @@ cd ~/microduck-dev/microduck-studio
 启动器会先停止上一次的 MuJoCo 进程，再启动新进程。手动关闭 Viewer 窗口也会停止
 MuJoCo，并且不会自动重启；再次运行启动器才会重新打开。
 
+运行 `./scripts/dev-stack.sh monitor` 可在当前终端直接打开 `robotctl` 实时可视化监控。
+按 `q` 退出；终端宽度达到 110 列时还会显示三维机器人视图。
+
 如果只需单独运行 Studio，不启动完整仿真控制链路：
 
 ```bash
