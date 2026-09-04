@@ -36,11 +36,15 @@ Microduck Studio 把现有的
 
 ## 快速开始
 
-当前一键联合启动需要可用的 Docker（含 Docker Compose）、`git`、`curl`、Python 3 和
-[`uv`](https://docs.astral.sh/uv/)。macOS 可以使用 Docker Desktop，也可以使用其他兼容的
-Docker 运行环境；项目本身并不强制依赖 Docker，各组件也可以分别在宿主机运行。该工作流
-使用 Docker 隔离 `robotd` 与 Studio Web 的构建和运行环境；
-`dev-stack.sh` 一键联合启动依赖这种隔离方式。
+### 环境要求
+
+- Docker（含 Docker Compose）
+- `git` 和 `curl`
+- Python 3 和 [`uv`](https://docs.astral.sh/uv/)
+
+> 各项目均可直接在宿主机运行，本身不强制依赖 Docker。`dev-stack.sh` 使用 Docker 隔离
+> `robotd` 与 Studio Web 的构建和运行环境，因此一键联合启动仍需 Docker。macOS 可以使用
+> Docker Desktop，也可以使用其他兼容的 Docker 运行环境。
 
 ### 1. 下载三个仓库
 
@@ -71,14 +75,14 @@ git clone https://github.com/microai-lab/microduck-studio.git
 [官方运行时仓库](https://github.com/pollen-robotics/microduck) 和
 [官方 RL 仓库](https://github.com/pollen-robotics/microduck_rl) 的开发分支仓库。
 
-如果仓库已经存在，请不要重复克隆，只需确认目录结构符合上图。完整的 MuJoCo 联调还需要
-官方 `microduck` 的 `sim-remote-io` 分支：当前常规运行时分支没有 `robotd --sim` 后端，
-而该分支提供连接 MuJoCo 身体服务（默认 TCP `127.0.0.1:7801`）的远程 `RobotIo` 实现。
+如果仓库已经存在，请不要重复克隆，只需确认目录结构符合上图。
 
-`robotd --sim` 启动的仍是完整 `robotd`，只是用远程仿真 I/O 替代真实电机和传感器：它从
-`microduck_rl` 的 `duck-body` 读取关节与传感器状态，并把控制目标发送回 MuJoCo。控制循环、
-策略推理、安全检查以及 JSON-RPC 接口保持不变，因此 Studio 和 `robotctl` 可以通过与真机
-相同的接口控制仿真机器人。该后端不会启动 Viewer、执行训练或绕过 `robotd` 的安全逻辑。
+### 2. 准备仿真后端
+
+完整的 MuJoCo 联调需要官方 `microduck` 的 `sim-remote-io` 分支。当前开发分支的常规运行时
+没有 `robotd --sim` 后端；该分支提供远程 `RobotIo` 实现，使 `robotd` 可以连接 MuJoCo
+身体服务（默认 TCP `127.0.0.1:7801`）。
+
 首次准备工作区时执行：
 
 ```bash
@@ -90,9 +94,10 @@ git -C microduck fetch upstream sim-remote-io
 地址并下载分支，不会切换 `microduck` 的当前分支。启动器会读取
 `upstream/sim-remote-io` 并把源码展开到 Studio 的隔离状态目录；如果没有提前获取，它也会
 自动把该分支下载到 `.studio-runtime/dev-stack/sim-runtime.git`，不会修改兄弟仓库的分支
-或工作区文件。
+或工作区文件。`robotd --sim` 在完整控制链路中的作用见
+[三个项目如何协作](#三个项目如何协作)。
 
-### 2. 准备 RL 环境
+### 3. 准备 RL 环境
 
 macOS 原生 Viewer 从 `microduck_rl` 的虚拟环境运行：
 
@@ -101,7 +106,7 @@ cd ~/microduck-dev/microduck_rl
 uv sync
 ```
 
-### 3. 启动并验证完整链路
+### 4. 启动并验证完整链路
 
 ```bash
 cd ~/microduck-dev/microduck-studio
@@ -120,9 +125,11 @@ control probe passed: MuJoCo moved ... m
 
 ## 主要能力
 
-| Web 控制 | 实时可见性 | 安全编排 |
-|---|---|---|
-| 适合手机操作的移动、启用/停止、坐下/站起、前滚翻和踢球 | 运行时、仿真器、仓库、策略、任务及连接状态 | Docker Compose 生命周期、端到端控制探测和白名单 RL 冒烟测试 |
+| 能力 | 内容 |
+|---|---|
+| Web 控制 | 适合手机操作的移动、启用/停止、坐下/站起、前滚翻和踢球 |
+| 实时可见性 | 运行时、仿真器、仓库、策略、任务及连接状态 |
+| 安全编排 | Docker Compose 生命周期、端到端控制探测和白名单 RL 冒烟测试 |
 
 运动控制始终使用一个持久 `robotd` 连接。松开控件、隐藏页面、连接断开或 Studio 关闭时
 都会发送 `robot.stop`；`robotd` 始终是最终安全和电机控制权威。
@@ -168,18 +175,20 @@ docker compose run --rm --no-deps --build robotctl monitor
 
 ## 三个项目如何协作
 
-当前工作区包含三个独立 Git 仓库：
+该工作区包含三个独立 Git 仓库，各自保持单向、清晰的职责边界：
 
 ```text
-microduck_rl
-  MuJoCo 身体 + 训练 + ONNX 导出
-       │ TCP/NDJSON :7801               policy.onnx + manifest
-       ▼                                      │
-microduck 仿真身体 ◀── robotd ────────────────┘
-                         ▲
-                         │ Unix socket 上的 JSON-RPC/NDJSON
-                         │
-                    Microduck Studio ◀── 浏览器
+浏览器
+   │ HTTP / JSON API
+   ▼
+Microduck Studio
+   │ Unix socket 上的 JSON-RPC / NDJSON
+   ▼
+robotd --sim ◀──────── policy.onnx + manifest ─────── microduck_rl 导出
+   │
+   │ TCP / NDJSON :7801
+   ▼
+duck-body / MuJoCo ────────────────────────────────── microduck_rl
 ```
 
 - **microduck** 负责 `robotd`、硬件 I/O、安全、策略加载和电机控制权。
@@ -188,7 +197,22 @@ microduck 仿真身体 ◀── robotd ─────────────�
 
 运行时和训练项目都不依赖 Studio；Studio 只使用它们公开的协议和工具。
 
+### `robotd --sim` 的作用
+
+`robotd --sim` 是一种启动模式，不是独立的运行环境。它会运行完整的 `robotd`，只是用远程
+仿真适配器替代真实电机和传感器 I/O：
+
+- 从 `microduck_rl` 的 `duck-body` 服务读取关节与传感器状态。
+- 通过 TCP 把控制目标发送回 MuJoCo。
+- 控制循环、策略推理、安全检查和 JSON-RPC 接口保持不变。
+- Studio 和 `robotctl` 因而可以使用与真机相同的控制接口操作仿真机器人。
+
+该后端不会启动 Viewer、执行训练或绕过 `robotd` 的安全逻辑。Docker 为一键工作流提供
+进程和依赖隔离，与 `--sim` 启动模式是两个不同概念。
+
 ## 容器和进程
+
+### Compose 布局
 
 项目使用的容器定义全部保存在本仓库，并按组件隔离：
 
@@ -205,7 +229,7 @@ compose.yaml         # robotd、Studio、robotctl 与无窗口 MuJoCo 服务
 显示这套 macOS 原生 GUI，因此默认链路中的 MuJoCo Viewer 仍是宿主机进程。
 `mujoco-headless` profile 用于 Linux/CI，不替代默认的 macOS Viewer。
 
-常用诊断命令：
+### 诊断命令
 
 ```bash
 docker compose ps
@@ -214,6 +238,8 @@ docker compose run --rm --no-deps robotctl health
 ```
 
 最后一条命令会运行临时工具容器，不会打开 Docker Shell。
+
+### 分别运行组件
 
 <details>
 <summary><strong>仅运行 MuJoCo Viewer</strong></summary>

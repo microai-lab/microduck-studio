@@ -36,11 +36,16 @@ robot safety, policy inference, simulator physics, or training logic.
 
 ## Quick start
 
-The current one-command stack needs Docker with Docker Compose, `git`, `curl`, Python 3, and
-[`uv`](https://docs.astral.sh/uv/). On macOS, Docker Desktop is one option, but any compatible
-Docker runtime is suitable. Docker is not a hard dependency of the individual projects, which can
-also run directly on the host. This workflow uses it to isolate the `robotd` and Studio Web build
-and runtime environments; the `dev-stack.sh` launcher relies on that isolation.
+### Requirements
+
+- Docker with Docker Compose
+- `git` and `curl`
+- Python 3 and [`uv`](https://docs.astral.sh/uv/)
+
+> The individual projects can run directly on the host and do not inherently require Docker.
+> The `dev-stack.sh` launcher does require Docker because it isolates the `robotd` and Studio Web
+> build and runtime environments. On macOS, Docker Desktop is one option; any compatible Docker
+> runtime is suitable.
 
 ### 1. Download the three repositories
 
@@ -73,19 +78,16 @@ forks of the [official runtime](https://github.com/pollen-robotics/microduck) an
 [official RL repository](https://github.com/pollen-robotics/microduck_rl).
 
 Existing repositories do not need to be cloned again; their directory layout only needs to match
-the structure above. Full MuJoCo integration also needs the official `microduck` `sim-remote-io`
-branch. The cloned development fork's regular runtime branch does not provide the `robotd --sim`
-backend; `sim-remote-io` provides the remote `RobotIo` implementation that connects `robotd` to
-the MuJoCo body service on TCP `127.0.0.1:7801` by default.
+the structure above.
 
-`robotd --sim` still runs the complete `robotd`; it replaces physical motor and sensor I/O with a
-remote simulation adapter. It reads joint and sensor state from the `microduck_rl` `duck-body`
-service and sends control targets back to MuJoCo. The control loop, policy inference, safety checks,
-and JSON-RPC interface remain unchanged, allowing Studio and `robotctl` to control the simulated
-robot through the same interface used for hardware. The backend does not start the Viewer, run
-training, or bypass `robotd` safety logic.
+### 2. Prepare the simulation backend
 
-Prepare the branch once from the workspace directory:
+Full MuJoCo integration requires the official `microduck` `sim-remote-io` branch. The regular
+runtime branch in the cloned development fork does not provide the `robotd --sim` backend; this
+branch supplies the remote `RobotIo` implementation that connects `robotd` to the MuJoCo body
+service at TCP `127.0.0.1:7801` by default.
+
+Fetch it once from the workspace directory:
 
 ```bash
 git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
@@ -97,9 +99,10 @@ commands add the repository address and download the branch; they do not switch 
 `microduck` branch. The launcher reads `upstream/sim-remote-io` and extracts it into isolated Studio
 state. If it was not fetched in advance, the launcher can also download it automatically into
 `.studio-runtime/dev-stack/sim-runtime.git` without changing the sibling repository's branch or
-working tree.
+working tree. See [How the projects fit together](#how-the-projects-fit-together) for the role of
+`robotd --sim` in the full control path.
 
-### 2. Prepare the RL environment
+### 3. Prepare the RL environment
 
 The native macOS Viewer runs from the `microduck_rl` virtual environment:
 
@@ -108,7 +111,7 @@ cd ~/microduck-dev/microduck_rl
 uv sync
 ```
 
-### 3. Start and verify everything
+### 4. Start and verify everything
 
 ```bash
 cd ~/microduck-dev/microduck-studio
@@ -128,9 +131,11 @@ control probe passed: MuJoCo moved ... m
 
 ## Capabilities
 
-| Web control | Live visibility | Safe orchestration |
-|---|---|---|
-| Phone-friendly movement, enable/stop, sit/stand, roulade, and kicks | Runtime, simulator, repository, job, and connection status, plus model discovery | Docker Compose lifecycle, an end-to-end control probe, and allowlisted RL smoke tests |
+| Area | Included |
+|---|---|
+| Web control | Phone-friendly movement, enable/stop, sit/stand, roulade, and kicks |
+| Live visibility | Runtime, simulator, repository, job, and connection status, plus model discovery |
+| Safe orchestration | Docker Compose lifecycle, an end-to-end control probe, and allowlisted RL smoke tests |
 
 Motion uses one persistent `robotd` connection. Releasing a control, hiding the page, disconnecting,
 or shutting Studio down sends `robot.stop`; `robotd` remains the final safety and motor authority.
@@ -178,18 +183,20 @@ narrower terminal.
 
 ## How the projects fit together
 
-The workspace contains three independent Git repositories:
+The workspace contains three independent Git repositories with one-way ownership boundaries:
 
 ```text
-microduck_rl
-  MuJoCo body + training + ONNX export
-       │ TCP/NDJSON :7801               policy.onnx + manifest
-       ▼                                      │
-microduck simulator body ◀── robotd ──────────┘
-                              ▲
-                              │ JSON-RPC/NDJSON over a Unix socket
-                              │
-                         Microduck Studio ◀── Browser
+Browser
+   │ HTTP / JSON API
+   ▼
+Microduck Studio
+   │ JSON-RPC / NDJSON over a Unix socket
+   ▼
+robotd --sim ◀──────── policy.onnx + manifest ─────── microduck_rl export
+   │
+   │ TCP / NDJSON :7801
+   ▼
+duck-body / MuJoCo ────────────────────────────────── microduck_rl
 ```
 
 - **microduck** owns `robotd`, hardware I/O, safety, policy loading, and motor authority.
@@ -199,7 +206,23 @@ microduck simulator body ◀── robotd ──────────┘
 
 Neither runtime nor training depends on Studio. Studio consumes their public protocols and tools.
 
+### What `robotd --sim` does
+
+`robotd --sim` is a startup mode, not a separate runtime environment. It runs the complete
+`robotd` while replacing physical motor and sensor I/O with a remote simulation adapter:
+
+- Joint and sensor state comes from the `microduck_rl` `duck-body` service.
+- Control targets are sent back to MuJoCo over TCP.
+- The control loop, policy inference, safety checks, and JSON-RPC interface remain unchanged.
+- Studio and `robotctl` therefore use the same control interface for simulation and hardware.
+
+The simulation backend does not start the Viewer, run training, or bypass `robotd` safety logic.
+Docker provides process and dependency isolation for the one-command workflow; it is separate from
+the `--sim` mode itself.
+
 ## Containers and processes
+
+### Compose layout
 
 All project-owned container definitions live here and are separated by component:
 
@@ -217,7 +240,7 @@ components are run separately. Containers cannot display this native macOS GUI d
 default MuJoCo Viewer remains a host process. The `mujoco-headless` profile is for Linux/CI and does
 not replace the default macOS Viewer.
 
-Useful diagnostics:
+### Diagnostics
 
 ```bash
 docker compose ps
@@ -226,6 +249,8 @@ docker compose run --rm --no-deps robotctl health
 ```
 
 The final command runs a temporary tool container; it does not open a Docker shell.
+
+### Run components separately
 
 <details>
 <summary><strong>Run only MuJoCo Viewer</strong></summary>
@@ -292,8 +317,7 @@ uv run ruff format --check .
 ## Safety
 
 Studio v0.1 has no authentication. Bind it to `127.0.0.1`; non-loopback binding should be limited
-to trusted LANs. Studio
-sends intents only; `robotd` remains the sole safety and motor authority.
+to trusted LANs. Studio sends intents only; `robotd` remains the sole safety and motor authority.
 
 ## License
 
