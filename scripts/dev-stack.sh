@@ -227,7 +227,8 @@ start_web() {
 
 verify_status() {
     attempts=0
-    while [ "$attempts" -lt 40 ]; do
+    status=
+    while [ "$attempts" -lt 120 ]; do
         status=$(curl -fsS "http://127.0.0.1:$STUDIO_PORT/api/status") || status=
         if [ -n "$status" ] && printf '%s' "$status" | python3 -c '
 import json, sys
@@ -241,6 +242,22 @@ assert status["simulator"]["connected"], status["simulator"]
         attempts=$((attempts + 1))
         sleep 0.25
     done
+    if [ -n "$status" ]; then
+        printf '%s' "$status" | python3 -c '
+import json, sys
+status = json.load(sys.stdin)
+robotd = status.get("robotd", {})
+simulator = status.get("simulator", {})
+print("robotd connected:", robotd.get("connected"), file=sys.stderr)
+if robotd.get("error"):
+    print("robotd error:", robotd["error"], file=sys.stderr)
+health = robotd.get("health") or {}
+print("robotd healthy:", health.get("healthy"), file=sys.stderr)
+print("MuJoCo connected:", simulator.get("connected"), file=sys.stderr)
+if simulator.get("error"):
+    print("MuJoCo error:", simulator["error"], file=sys.stderr)
+' || true
+    fi
     die "Studio, robotd, and MuJoCo did not become healthy together"
 }
 
@@ -317,7 +334,13 @@ ensure_onnxruntime
 write_robotd_params
 
 stop_stack
-trap 'code=$?; if [ "$code" -ne 0 ]; then stop_stack; fi; exit "$code"' EXIT
+trap 'code=$?; if [ "$code" -ne 0 ]; then
+    if [ "${MICRODUCK_KEEP_FAILED_STACK:-false}" = true ]; then
+        say "leaving failed stack running for diagnostics"
+    else
+        stop_stack
+    fi
+fi; exit "$code"' EXIT
 start_body
 start_robotd
 start_web
