@@ -16,7 +16,7 @@ class TcpToUnixHandler(socketserver.BaseRequestHandler):
 
     def handle(self) -> None:
         upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        upstream.connect(self.unix_socket)
+        upstream.connect(str(self.unix_socket))
         peers = [self.request, upstream]
         try:
             while True:
