@@ -51,7 +51,7 @@ microduck-dev/          # 仅作为工作区，不是 Git 仓库
 └── microduck-studio/   # Web 界面和开发链路编排
 ```
 
-全新安装时，下载当前开发环境使用的三个仓库，并把官方运行时仓库注册为 `upstream`：
+全新安装时，下载当前开发环境使用的三个仓库：
 
 ```bash
 mkdir -p ~/microduck-dev
@@ -60,9 +60,6 @@ cd ~/microduck-dev
 git clone https://github.com/ttfont/microduck.git
 git clone https://github.com/ttfont/microduck_rl.git
 git clone https://github.com/microai-lab/microduck-studio.git
-
-git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
-git -C microduck fetch upstream sim-remote-io
 ```
 
 下载地址：[microduck](https://github.com/ttfont/microduck)、
@@ -71,8 +68,10 @@ git -C microduck fetch upstream sim-remote-io
 [官方运行时仓库](https://github.com/pollen-robotics/microduck) 和
 [官方 RL 仓库](https://github.com/pollen-robotics/microduck_rl) 的开发分支仓库。
 
-如果仓库已经存在，请不要重复克隆；只需确认目录结构符合上图，并确保
-`git -C microduck rev-parse upstream/sim-remote-io` 能够成功执行。
+如果仓库已经存在，请不要重复克隆，只需确认目录结构符合上图。首次启动时，如果本地没有
+对应版本，Studio 会自动把官方 `sim-remote-io` 运行时源码下载到
+`.studio-runtime/dev-stack/sim-runtime.git`。它不会给 `microduck` 添加 remote、切换分支
+或修改工作区文件。
 
 ### 2. 准备 RL 环境
 
@@ -97,7 +96,7 @@ cd ~/microduck-dev/microduck-studio
 control probe passed: MuJoCo moved ... m
 ```
 
-> 启动器不会切换兄弟仓库的工作分支。它会把所需的 `upstream/sim-remote-io` 运行时版本
+> 启动器不会切换兄弟仓库的工作分支。它会把所需的 `sim-remote-io` 运行时版本
 > 展开到隔离的本地状态目录。
 
 ## 主要能力

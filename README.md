@@ -52,8 +52,7 @@ microduck-dev/          # workspace only; not a Git repository
 └── microduck-studio/   # Web UI and development-stack orchestration
 ```
 
-For a fresh workspace, clone the repositories used by this development setup and register the
-official runtime repository as `upstream`:
+For a fresh workspace, clone the repositories used by this development setup:
 
 ```bash
 mkdir -p ~/microduck-dev
@@ -62,9 +61,6 @@ cd ~/microduck-dev
 git clone https://github.com/ttfont/microduck.git
 git clone https://github.com/ttfont/microduck_rl.git
 git clone https://github.com/microai-lab/microduck-studio.git
-
-git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
-git -C microduck fetch upstream sim-remote-io
 ```
 
 Download links: [microduck](https://github.com/ttfont/microduck),
@@ -73,8 +69,10 @@ Download links: [microduck](https://github.com/ttfont/microduck),
 forks of the [official runtime](https://github.com/pollen-robotics/microduck) and
 [official RL repository](https://github.com/pollen-robotics/microduck_rl).
 
-If the repositories already exist, do not clone them again. Confirm the directory layout above and
-make sure `git -C microduck rev-parse upstream/sim-remote-io` succeeds.
+If the repositories already exist, do not clone them again; just confirm the directory layout
+above. On first launch, Studio automatically downloads the official `sim-remote-io` runtime source
+into `.studio-runtime/dev-stack/sim-runtime.git` when it is not already available locally. It does
+not add a remote to `microduck`, switch its branch, or change its working tree.
 
 ### 2. Prepare the RL environment
 
@@ -101,7 +99,7 @@ control probe passed: MuJoCo moved ... m
 ```
 
 > The launcher never switches a sibling repository's working branch. It extracts the required
-> `upstream/sim-remote-io` runtime revision into isolated local state.
+> `sim-remote-io` runtime revision into isolated Studio state.
 
 ## What you get
 
