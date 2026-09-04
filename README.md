@@ -76,8 +76,16 @@ Existing repositories do not need to be cloned again; their directory layout onl
 the structure above. Full MuJoCo integration also needs the official `microduck` `sim-remote-io`
 branch. The cloned development fork's regular runtime branch does not provide the `robotd --sim`
 backend; `sim-remote-io` provides the remote `RobotIo` implementation that connects `robotd` to
-the MuJoCo body service on TCP `127.0.0.1:7801` by default. Prepare it once from the workspace
-directory:
+the MuJoCo body service on TCP `127.0.0.1:7801` by default.
+
+`robotd --sim` still runs the complete `robotd`; it replaces physical motor and sensor I/O with a
+remote simulation adapter. It reads joint and sensor state from the `microduck_rl` `duck-body`
+service and sends control targets back to MuJoCo. The control loop, policy inference, safety checks,
+and JSON-RPC interface remain unchanged, allowing Studio and `robotctl` to control the simulated
+robot through the same interface used for hardware. The backend does not start the Viewer, run
+training, or bypass `robotd` safety logic.
+
+Prepare the branch once from the workspace directory:
 
 ```bash
 git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
