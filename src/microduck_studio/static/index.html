@@ -9,7 +9,10 @@
   </head>
   <body>
     <main>
-      <header><div><p class="eyebrow">LOCAL DEVELOPMENT COMPANION</p><h1>Microduck Studio</h1></div><span id="overall" class="pill">检查中</span></header>
+      <header>
+        <div><p class="eyebrow">LOCAL DEVELOPMENT COMPANION</p><h1>Microduck Studio</h1></div>
+        <span id="overall" class="pill bilingual"><span id="overall-zh">检查中</span><small id="overall-en" class="label-en">Checking</small></span>
+      </header>
       <section class="status-grid">
         <article><span>microduck</span><strong id="repo-runtime">—</strong><small id="repo-runtime-detail"></small></article>
         <article><span>microduck_rl</span><strong id="repo-rl">—</strong><small id="repo-rl-detail"></small></article>
@@ -18,24 +21,37 @@
       </section>
 
       <section class="panel controller">
-        <div class="section-title"><div><p class="eyebrow">ROBOT CONTROL</p><h2>机器人自身坐标</h2></div><span id="control-status">等待操作</span></div>
+        <div class="section-title">
+          <h2>机器人自身坐标<small class="label-en">Robot-relative coordinates</small></h2>
+          <span id="control-status" class="bilingual"><span id="control-status-zh">等待操作</span><small id="control-status-en" class="label-en">Waiting for input</small></span>
+        </div>
         <div class="actions">
-          <button class="primary" data-action="enable">启用 RL / 站起</button><button class="danger" data-action="stop">停止</button>
-          <button data-skill="sit_toggle">坐下 / 起身</button><button data-skill="roulade">前滚翻</button>
-          <button data-skill="kick_left">左踢</button><button data-skill="kick_right">右踢</button>
+          <button class="primary" data-action="enable"><span>启用 RL / 站起</span><small class="label-en">Enable RL / Stand up</small></button>
+          <button class="danger" data-action="stop"><span>停止</span><small class="label-en">Stop</small></button>
+          <button data-skill="sit_toggle" data-label-zh="坐下 / 起身" data-label-en="Sit / Stand"><span>坐下 / 起身</span><small class="label-en">Sit / Stand</small></button>
+          <button data-skill="roulade" data-label-zh="前滚翻" data-label-en="Forward roll"><span>前滚翻</span><small class="label-en">Forward roll</small></button>
+          <button data-skill="kick_left" data-label-zh="左踢" data-label-en="Kick left"><span>左踢</span><small class="label-en">Kick left</small></button>
+          <button data-skill="kick_right" data-label-zh="右踢" data-label-en="Kick right"><span>右踢</span><small class="label-en">Kick right</small></button>
         </div>
         <div class="pad">
-          <button data-vyaw="1.5">↶<small>左转</small></button><button data-vx="0.3">↑<small>前进</small></button><button data-vyaw="-1.5">↷<small>右转</small></button>
-          <button data-vy="0.3">←<small>左移</small></button><button class="danger" data-action="stop">■<small>停止</small></button><button data-vy="-0.3">→<small>右移</small></button>
-          <i></i><button data-vx="-0.3">↓<small>后退</small></button><i></i>
+          <button data-vyaw="1.5">↶<small>左转<span class="label-en">Turn left</span></small></button>
+          <button data-vx="0.3">↑<small>前进<span class="label-en">Forward</span></small></button>
+          <button data-vyaw="-1.5">↷<small>右转<span class="label-en">Turn right</span></small></button>
+          <button data-vy="0.3">←<small>左移<span class="label-en">Move left</span></small></button>
+          <button class="danger" data-action="stop">■<small>停止<span class="label-en">Stop</span></small></button>
+          <button data-vy="-0.3">→<small>右移<span class="label-en">Move right</span></small></button>
+          <i></i><button data-vx="-0.3">↓<small>后退<span class="label-en">Backward</span></small></button><i></i>
         </div>
-        <p class="hint">按住移动、松手停止。方向以鸭子自身朝向为准；不是屏幕坐标。</p>
+        <p class="hint">按住移动、松手停止。方向以鸭子自身朝向为准；不是屏幕坐标。<small class="label-en">Hold to move and release to stop. Directions are relative to the duck, not the screen.</small></p>
       </section>
 
       <section class="panel training">
-        <div class="section-title"><div><p class="eyebrow">RL WORKBENCH</p><h2>训练 Smoke Test</h2></div><span id="jobs-mode" class="pill">—</span></div>
-        <form id="smoke-form"><input id="task-id" placeholder="TASK_ID" autocomplete="off"><button class="primary">64 envs · 5 iterations</button></form>
-        <div id="jobs" class="jobs"><p class="muted">还没有 Studio 启动的训练任务。</p></div>
+        <div class="section-title">
+          <h2>训练冒烟测试<small class="label-en">Training smoke test</small></h2>
+          <span id="jobs-mode" class="pill bilingual"><span id="jobs-mode-zh">—</span><small id="jobs-mode-en" class="label-en">—</small></span>
+        </div>
+        <form id="smoke-form"><input id="task-id" placeholder="任务 ID / TASK_ID" autocomplete="off"><button class="primary"><span>64 个环境 · 5 次迭代</span><small class="label-en">64 envs · 5 iterations</small></button></form>
+        <div id="jobs" class="jobs"><p class="muted">还没有 Studio 启动的训练任务。<small class="label-en">No training jobs have been started by Studio.</small></p></div>
       </section>
     </main>
     <script src="/static/app.js"></script>

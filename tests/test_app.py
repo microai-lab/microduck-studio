@@ -25,6 +25,10 @@ def test_index_is_served(tmp_path):
         response = client.get("/")
         assert response.status_code == 200
         assert "Microduck Studio" in response.text
+        assert "机器人自身坐标" in response.text
+        assert "Robot-relative coordinates" in response.text
+        assert "启用 RL / 站起" in response.text
+        assert "Enable RL / Stand up" in response.text
 
 
 def test_training_is_opt_in(tmp_path):
