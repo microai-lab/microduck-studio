@@ -92,10 +92,36 @@ macOS 原生 MuJoCo Viewer，再通过 Docker Compose 按依赖顺序构建并�
 | 在当前终端打开 `robotctl` 实时可视化监控 | `./scripts/dev-stack.sh monitor` |
 | 仅停止该开发链路 | `./scripts/dev-stack.sh stop` |
 
-按 `q` 退出监控；终端宽度达到 110 列时还会显示三维机器人视图。
-
 关闭 MuJoCo 窗口会停止该仿真进程，它不会自动重启。需要恢复完整链路时，
 再次执行 `./scripts/dev-stack.sh`。
+
+### 打开 `robotctl` 可视化监控
+
+先启动开发链路，然后在同一个 `microduck-studio` 目录中执行启动器命令：
+
+```bash
+./scripts/dev-stack.sh monitor
+```
+
+如果不经过启动器封装，也可以直接通过 Compose 调用同一个监控程序：
+
+```bash
+docker compose run --rm --no-deps --build robotctl monitor
+```
+
+两条命令都会把监控界面直接连接到当前终端。它们会启动一个一次性的 `robotctl` 工具容器，
+并连接开发链路已有的运行时 socket；它们**不会**打开或进入 Docker Shell。推荐使用启动器
+命令，因为它还会先确认 `robotd` 正在运行。
+
+监控快捷键：
+
+| 按键 | 动作 |
+|---|---|
+| `q`、`Esc` 或 `Ctrl-C` | 退出监控 |
+| `[` / `]` 或 `Left` / `Right` | 旋转三维机器人视角 |
+| `d` | 显示或隐藏三维机器人视图 |
+
+终端宽度达到 110 列时才会显示三维视图；较窄的终端仍会显示实时状态和关节表格。
 
 ### 容器目录
 
@@ -120,11 +146,11 @@ Linux/CI，不替代默认的 macOS Viewer。
 docker compose ps
 docker compose logs -f studio robotd
 docker compose run --rm --no-deps robotctl health
-docker compose run --rm --no-deps robotctl monitor
 ```
 
-最后两条命令会启动一个临时工具容器，让 `robotctl` 连接同一个运行时 socket；
-它们不会进入已运行的 `robotd` 容器。
+健康检查命令会启动一个临时工具容器，让 `robotctl` 连接同一个运行时 socket；
+它不会进入已运行的 `robotd` 容器。交互式监控请参见
+[打开 `robotctl` 可视化监控](#打开-robotctl-可视化监控)。
 
 ### 仅启动 MuJoCo Viewer
 
