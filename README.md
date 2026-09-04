@@ -56,7 +56,20 @@ Studio; development, training, and robot operation continue to work without it.
   never accepts arbitrary shell input.
 - Local job status and logs under `.studio-runtime/`.
 
-## Run
+## Run the development stack
+
+### Prerequisites
+
+- macOS with Docker Desktop running.
+- `git`, `curl`, Python 3, and [`uv`](https://docs.astral.sh/uv/) available on the host.
+- `microduck`, `microduck_rl`, and `microduck-studio` checked out as sibling directories.
+- The RL environment prepared once with `uv sync` from `microduck_rl`.
+
+The launcher currently uses the `upstream/sim-remote-io` revision of `microduck` for the
+simulation backend, in an isolated runtime directory. It does not modify or switch the branch in
+your working checkout.
+
+### One-command startup
 
 For the complete macOS development stack—MuJoCo Viewer, a simulation-enabled `robotd` with the
 bundled policies, and Studio—start Docker Desktop and run:
@@ -74,12 +87,22 @@ measurably moved the MuJoCo body; a merely reachable web page is not considered 
 
 Use `./scripts/dev-stack.sh status` to check it and `./scripts/dev-stack.sh stop` to stop only the
 services created by the launcher.
-The launcher stops an earlier MuJoCo process before starting a new one. Closing the Viewer window
-manually also stops MuJoCo, and it remains closed until the launcher is run again.
 
-Run `./scripts/dev-stack.sh monitor` to open `robotctl`'s live visual monitor directly in the
-current terminal. Press `q` to exit it; a terminal at least 110 columns wide also shows the 3D
-robot view.
+### Daily commands
+
+Run these from `microduck-studio`:
+
+| Goal | Command |
+|---|---|
+| Start or restart everything and run the control probe | `./scripts/dev-stack.sh` |
+| Check Studio, `robotd`, and MuJoCo together | `./scripts/dev-stack.sh status` |
+| Open the live `robotctl` visual monitor in this terminal | `./scripts/dev-stack.sh monitor` |
+| Stop only this development stack | `./scripts/dev-stack.sh stop` |
+
+Press `q` to exit the monitor. A terminal at least 110 columns wide also shows its 3D robot view.
+
+Closing the MuJoCo window stops that simulator process. It is not automatically restarted; run
+`./scripts/dev-stack.sh` again when you want the complete stack back.
 
 ### Container layout
 
@@ -93,11 +116,51 @@ docker/
 compose.yaml         # robotd, Studio, robotctl, and headless MuJoCo services
 ```
 
-The launcher invokes `docker compose up`, `down`, and `run`; it no longer starts individual
-containers with `docker run`. Use `docker compose ps` and `docker compose logs -f robotd` for
-container status and logs. The macOS Viewer remains a native process because Docker Desktop cannot
-display that native GUI directly. The `mujoco-headless` Compose profile exists for Linux/CI use and
-does not replace the Viewer in the default macOS stack.
+The launcher invokes `docker compose up`, `down`, and `run`; it does not start individual
+containers with `docker run`. The macOS Viewer remains a native process because Docker Desktop
+cannot display that native GUI directly. The `mujoco-headless` Compose profile exists for Linux/CI
+use and does not replace the Viewer in the default macOS stack.
+
+Useful direct Compose commands:
+
+```bash
+docker compose ps
+docker compose logs -f studio robotd
+docker compose run --rm --no-deps robotctl health
+docker compose run --rm --no-deps robotctl monitor
+```
+
+The last two commands run `robotctl` in a temporary tool container attached to the same runtime
+socket. They do not enter the already-running `robotd` container.
+
+### Run only the MuJoCo Viewer
+
+Stop the complete stack first if it already owns port 7801, then run the simulator body directly
+from the sibling RL repository:
+
+```bash
+./scripts/dev-stack.sh stop
+cd ../microduck_rl
+uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801
+```
+
+Close the Viewer window or press `Ctrl-C` in that terminal to stop it. This mode shows the model
+and exposes the simulator TCP endpoint, but it does not start `robotd` or Studio.
+
+### Connectivity checks
+
+The startup command does more than wait for open ports: it sends a move through
+`Web -> Studio -> robotd -> policy -> MuJoCo` and requires measurable simulator displacement. If
+it prints `control probe passed`, the web control path was working at startup.
+
+If a later click produces no movement:
+
+1. Run `./scripts/dev-stack.sh status`; all three lines must be online/healthy.
+2. In Studio, confirm the `robotd` and simulator cards are connected, then click **Enable RL**.
+3. Inspect `docker compose logs -f studio robotd` and
+   `.studio-runtime/dev-stack/mujoco.log` for a disconnect or policy refusal.
+4. Run `./scripts/dev-stack.sh` again. It stops the processes owned by the previous launch, starts
+   a clean stack, and repeats the end-to-end control probe before reporting ready.
 
 To run Studio without the complete simulator control chain:
 
