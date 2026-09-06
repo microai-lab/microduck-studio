@@ -1,23 +1,21 @@
 # syntax=docker/dockerfile:1.7
 
-FROM ghcr.io/astral-sh/uv:0.8.19 AS uv
 FROM python:3.12-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        git \
         libegl1 \
         libgl1 \
         libglfw3 \
+        libosmesa6 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=uv /uv /uvx /bin/
 WORKDIR /workspace
-COPY --from=microduck_rl_source . .
+COPY --from=microduck_rl_source src ./src
 
-ENV MUJOCO_GL=egl \
-    UV_LINK_MODE=copy
-RUN uv sync --frozen --no-dev
+ENV MUJOCO_GL=osmesa \
+    PYTHONPATH=/workspace/src
+RUN pip install --no-cache-dir "mujoco>=3.3,<4" "numpy>=2,<3" "pillow>=11,<13"
 
-ENTRYPOINT ["uv", "run", "--no-sync", "duck-body"]
+ENTRYPOINT ["python", "-m", "mjlab_microduck.sim.body_server"]
 CMD ["--keyframe", "HOME", "--port", "7801"]

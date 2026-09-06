@@ -29,9 +29,10 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         parent = Path(__file__).resolve().parents[3]
+        microduck_rl_repo = Path(os.getenv("MICRODUCK_RL_REPO", parent / "microduck_rl"))
         return cls(
             microduck_repo=Path(os.getenv("MICRODUCK_REPO", parent / "microduck")),
-            microduck_rl_repo=Path(os.getenv("MICRODUCK_RL_REPO", parent / "microduck_rl")),
+            microduck_rl_repo=microduck_rl_repo,
             robotd_socket=Path(os.getenv("MICRODUCK_ROBOTD_SOCKET", "/run/robotd.sock")),
             body_host=os.getenv("MICRODUCK_BODY_HOST", "127.0.0.1"),
             body_port=int(os.getenv("MICRODUCK_BODY_PORT", "7801")),

@@ -8,9 +8,24 @@ MICRODUCK_REPO=${MICRODUCK_REPO:-"$WORKSPACE/microduck"}
 MICRODUCK_RL_REPO=${MICRODUCK_RL_REPO:-"$WORKSPACE/microduck_rl"}
 RUNTIME_DIR=${MICRODUCK_STUDIO_RUNTIME:-"$STUDIO_REPO/.studio-runtime/dev-stack"}
 COMPOSE_FILE="$STUDIO_REPO/compose.yaml"
+GPU_DRI_FILE="$STUDIO_REPO/compose.gpu-dri.yaml"
+GPU_NVIDIA_FILE="$STUDIO_REPO/compose.gpu-nvidia.yaml"
 
 BODY_PORT=${MICRODUCK_BODY_PORT:-7801}
 STUDIO_PORT=${MICRODUCK_STUDIO_PORT:-8090}
+# Rendering/isolation choices must remain visible in shell history. The no-argument default is the
+# authoritative native MuJoCo path; Docker and GPU passthrough are selected only with CLI flags.
+SIM_MODE=native
+GPU=none
+RENDER_WIDTH=${MICRODUCK_RENDER_WIDTH:-1280}
+RENDER_HEIGHT=${MICRODUCK_RENDER_HEIGHT:-720}
+RENDER_FPS=${MICRODUCK_RENDER_FPS:-24}
+RENDER_QUALITY=${MICRODUCK_RENDER_QUALITY:-95}
+# Native MuJoCo is a background service by default. The browser receives the same authoritative
+# frames; opening the desktop Viewer is an explicit development choice.
+HEADLESS=true
+STOP_ON_BROWSER_CLOSE=false
+CONTROL_PROBE=true
 SIM_REF=${MICRODUCK_SIM_REF:-sim-remote-io}
 SIM_REPO_URL=${MICRODUCK_SIM_REPO_URL:-https://github.com/pollen-robotics/microduck.git}
 RUST_IMAGE=${MICRODUCK_RUST_IMAGE:-rust:1.89-bookworm}
@@ -24,10 +39,14 @@ HOST_BRIDGE_SCRIPT=/tmp/microduck-studio-rpc-bridge.py
 HOST_STUDIO_SCRIPT=/tmp/microduck-studio-run-web.sh
 BODY_PID_FILE="$RUNTIME_DIR/mujoco.pid"
 BODY_PLIST="$RUNTIME_DIR/mujoco.plist"
+SERVICE_MANAGER_PID_FILE="$RUNTIME_DIR/service-manager.pid"
+SERVICE_MANAGER_PLIST="$RUNTIME_DIR/service-manager.plist"
+SERVICE_MANAGER_DIR="$RUNTIME_DIR/services"
 
 BODY_LABEL=com.microduck.mujoco.viewer
 SOCKET_LABEL=com.microduck.studio.socketbridge
 WEB_LABEL=com.microduck.studio.web
+SERVICE_MANAGER_LABEL=com.microduck.studio.service-manager
 DOMAIN="gui/$(id -u)"
 
 say() { printf '\033[36m==\033[0m %s\n' "$*"; }
@@ -35,6 +54,7 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
 label_exists() {
+    command -v launchctl >/dev/null 2>&1 || return 1
     launchctl print "$DOMAIN/$1" >/dev/null 2>&1
 }
 
@@ -47,7 +67,11 @@ remove_container() {
 }
 
 compose() {
-    docker compose --project-directory "$STUDIO_REPO" -f "$COMPOSE_FILE" "$@"
+    case "$GPU" in
+        none) docker compose --project-directory "$STUDIO_REPO" -f "$COMPOSE_FILE" "$@" ;;
+        dri) docker compose --project-directory "$STUDIO_REPO" -f "$COMPOSE_FILE" -f "$GPU_DRI_FILE" "$@" ;;
+        nvidia) docker compose --project-directory "$STUDIO_REPO" -f "$COMPOSE_FILE" -f "$GPU_NVIDIA_FILE" "$@" ;;
+    esac
 }
 
 ensure_runtime_volume() {
@@ -87,17 +111,84 @@ stop_body() {
     rm -f "$BODY_PLIST"
 }
 
+stop_service_manager() {
+    remove_label "$SERVICE_MANAGER_LABEL"
+    if [ -f "$SERVICE_MANAGER_PID_FILE" ]; then
+        pid=$(sed -n '1p' "$SERVICE_MANAGER_PID_FILE")
+        case "$pid" in
+            ''|*[!0-9]*) ;;
+            *) kill "$pid" 2>/dev/null || true ;;
+        esac
+    fi
+    rm -f "$SERVICE_MANAGER_PID_FILE" "$SERVICE_MANAGER_PLIST"
+    rm -f "$SERVICE_MANAGER_DIR/manager.json"
+}
+
 stop_stack() {
     say "stopping Studio development stack"
     # Remove host jobs and containers created by launcher versions before Compose.
     remove_label "$WEB_LABEL"
     remove_label "$SOCKET_LABEL"
+    stop_service_manager
     stop_body
-    compose down --remove-orphans >/dev/null 2>&1 || true
+    # Include the optional simulator profile so switching docker -> native cannot leave its
+    # published body port behind and accidentally connect native robotd to the old container.
+    compose --profile headless down --remove-orphans >/dev/null 2>&1 || true
     remove_container "$RPC_CONTAINER"
     remove_container "$ROBOTD_CONTAINER"
     remove_container "$WEB_CONTAINER"
     rm -f "$HOST_SOCKET" "$HOST_BRIDGE_SCRIPT" "$HOST_STUDIO_SCRIPT"
+}
+
+start_service_manager() {
+    say "starting restricted host service manager"
+    python_bin=$(command -v python3)
+    docker_bin=$(command -v docker)
+    launchctl_bin=$(command -v launchctl || printf launchctl)
+    mkdir -p "$SERVICE_MANAGER_DIR"
+    if [ "$(uname -s)" = Darwin ]; then
+        python3 -c '
+import plistlib, sys
+
+path, label, python, script, directory, mode, domain, body_label, body_port, docker, launchctl, log = sys.argv[1:]
+config = {
+    "Label": label,
+    "ProgramArguments": [
+        python, script,
+        "--directory", directory,
+        "--mode", mode,
+        "--domain", domain,
+        "--body-label", body_label,
+        "--body-port", body_port,
+        "--docker", docker,
+        "--launchctl", launchctl,
+    ],
+    "RunAtLoad": True,
+    "KeepAlive": True,
+    "StandardOutPath": log,
+    "StandardErrorPath": log,
+}
+with open(path, "wb") as output:
+    plistlib.dump(config, output)
+' "$SERVICE_MANAGER_PLIST" "$SERVICE_MANAGER_LABEL" "$python_bin" \
+            "$STUDIO_REPO/scripts/service-manager.py" "$SERVICE_MANAGER_DIR" "$SIM_MODE" \
+            "$DOMAIN" "$BODY_LABEL" "$BODY_PORT" "$docker_bin" "$launchctl_bin" \
+            "$RUNTIME_DIR/service-manager.log"
+        launchctl bootstrap "$DOMAIN" "$SERVICE_MANAGER_PLIST"
+    else
+        "$python_bin" "$STUDIO_REPO/scripts/service-manager.py" \
+            --directory "$SERVICE_MANAGER_DIR" --mode "$SIM_MODE" --domain "$DOMAIN" \
+            --body-label "$BODY_LABEL" --body-port "$BODY_PORT" --docker "$docker_bin" \
+            --launchctl "$launchctl_bin" \
+            >>"$RUNTIME_DIR/service-manager.log" 2>&1 &
+        printf '%s\n' "$!" >"$SERVICE_MANAGER_PID_FILE"
+    fi
+    attempts=0
+    while [ ! -f "$SERVICE_MANAGER_DIR/manager.json" ] && [ "$attempts" -lt 40 ]; do
+        attempts=$((attempts + 1))
+        sleep 0.1
+    done
+    [ -f "$SERVICE_MANAGER_DIR/manager.json" ] || die "host service manager did not start"
 }
 
 wait_tcp() {
@@ -164,6 +255,12 @@ ensure_sim_source() {
     export MICRODUCK_SIM_SOURCE MICRODUCK_RUNTIME_DIR
     export MICRODUCK_REPO MICRODUCK_RL_REPO MICRODUCK_BODY_PORT MICRODUCK_STUDIO_PORT
     export MICRODUCK_RUST_IMAGE MICRODUCK_ORT_VERSION
+    MICRODUCK_RENDER_WIDTH=$RENDER_WIDTH
+    MICRODUCK_RENDER_HEIGHT=$RENDER_HEIGHT
+    MICRODUCK_RENDER_FPS=$RENDER_FPS
+    MICRODUCK_RENDER_QUALITY=$RENDER_QUALITY
+    export MICRODUCK_RENDER_WIDTH MICRODUCK_RENDER_HEIGHT MICRODUCK_RENDER_FPS
+    export MICRODUCK_RENDER_QUALITY MICRODUCK_BODY_HOST MICRODUCK_MUJOCO_GL
 }
 
 write_robotd_params() {
@@ -185,24 +282,42 @@ device = "default"
 EOF
 }
 
-start_body() {
-    say "starting MuJoCo body and Viewer"
+start_native_body() {
+    if [ "$HEADLESS" = true ]; then
+        say "starting native MuJoCo body in the background"
+    else
+        say "starting MuJoCo body and Viewer"
+    fi
     python3 -c '
 import plistlib, sys
 
-path, label, python, mjpython, port, log = sys.argv[1:]
+path, label, python, mjpython, port, width, height, fps, quality, headless, idle, log = sys.argv[1:]
+arguments = [
+    python,
+    mjpython,
+    "-m",
+    "mjlab_microduck.sim.body_server",
+    "--keyframe",
+    "HOME",
+    "--port",
+    port,
+    "--render",
+    "--render-width",
+    width,
+    "--render-height",
+    height,
+    "--render-fps",
+    fps,
+    "--render-quality",
+    quality,
+]
+if headless == "true":
+    arguments.append("--headless")
+if idle != "0":
+    arguments.extend(["--exit-on-render-idle", idle])
 config = {
     "Label": label,
-    "ProgramArguments": [
-        python,
-        mjpython,
-        "-m",
-        "mjlab_microduck.sim.body_server",
-        "--keyframe",
-        "HOME",
-        "--port",
-        port,
-    ],
+    "ProgramArguments": arguments,
     "RunAtLoad": True,
     "KeepAlive": False,
     "ProcessType": "Interactive",
@@ -214,9 +329,17 @@ with open(path, "wb") as output:
 ' "$BODY_PLIST" "$BODY_LABEL" \
         "$MICRODUCK_RL_REPO/.venv/bin/python" \
         "$MICRODUCK_RL_REPO/.venv/bin/mjpython" \
-        "$BODY_PORT" "$RUNTIME_DIR/mujoco.log"
+        "$BODY_PORT" "$RENDER_WIDTH" "$RENDER_HEIGHT" "$RENDER_FPS" "$RENDER_QUALITY" \
+        "$HEADLESS" "$([ "$STOP_ON_BROWSER_CLOSE" = true ] && printf 10 || printf 0)" \
+        "$RUNTIME_DIR/mujoco.log"
     launchctl bootstrap "$DOMAIN" "$BODY_PLIST"
     wait_tcp 127.0.0.1 "$BODY_PORT" "MuJoCo body"
+}
+
+start_docker_body() {
+    say "building and starting headless MuJoCo in Docker ($GPU)"
+    compose --profile headless up -d --build mujoco-headless
+    wait_tcp 127.0.0.1 "$BODY_PORT" "Docker MuJoCo body"
 }
 
 start_compose() {
@@ -305,7 +428,50 @@ monitor_robot() {
     compose run --rm --no-deps --build robotctl
 }
 
-action=${1:-start}
+action=start
+if [ "$#" -gt 0 ]; then
+    case "$1" in
+        start|stop|status|monitor) action=$1; shift ;;
+    esac
+fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --sim-mode)
+            [ "$#" -ge 2 ] || die "--sim-mode requires native or docker"
+            SIM_MODE=$2
+            shift 2
+            ;;
+        --gpu)
+            [ "$#" -ge 2 ] || die "--gpu requires none, dri, or nvidia"
+            GPU=$2
+            shift 2
+            ;;
+        --headless)
+            HEADLESS=true
+            shift
+            ;;
+        --viewer)
+            HEADLESS=false
+            shift
+            ;;
+        --stop-on-browser-close)
+            STOP_ON_BROWSER_CLOSE=true
+            shift
+            ;;
+        --skip-control-probe)
+            CONTROL_PROBE=false
+            shift
+            ;;
+        *) die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]" ;;
+    esac
+done
+
+case "$SIM_MODE" in native|docker) ;; *) die "--sim-mode requires native or docker" ;; esac
+case "$GPU" in none|dri|nvidia) ;; *) die "--gpu requires none, dri, or nvidia" ;; esac
+[ "$SIM_MODE" = docker ] || [ "$GPU" = none ] || die "--gpu is only valid with --sim-mode docker"
+[ "$HEADLESS" = true ] || [ "$SIM_MODE" = native ] || die "--viewer is only valid with native mode"
+[ "$STOP_ON_BROWSER_CLOSE" = false ] || [ "$HEADLESS" = true ] || die "--stop-on-browser-close requires --headless"
+
 case "$action" in
     stop)
         stop_stack
@@ -320,20 +486,31 @@ case "$action" in
     start)
         ;;
     *)
-        die "usage: $0 [start|stop|status|monitor]"
+        die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]"
         ;;
 esac
 
 need curl
 need docker
 need git
-need launchctl
 need python3
-[ "$(uname -s)" = Darwin ] || die "this launcher currently supports macOS only"
 [ -d "$MICRODUCK_REPO/.git" ] || die "microduck sibling repository is missing"
-[ -f "$MICRODUCK_RL_REPO/.venv/bin/mjpython" ] || die "run 'uv sync' in microduck_rl first"
+if [ "$SIM_MODE" = native ]; then
+    [ "$(uname -s)" = Darwin ] || die "native MuJoCo mode currently supports macOS only"
+    need launchctl
+    [ -f "$MICRODUCK_RL_REPO/.venv/bin/mjpython" ] || die "run 'uv sync' in microduck_rl first"
+    MICRODUCK_BODY_HOST=host.docker.internal
+else
+    MICRODUCK_BODY_HOST=mujoco-headless
+fi
+case "$GPU" in
+    none) MICRODUCK_MUJOCO_GL=${MICRODUCK_MUJOCO_GL:-osmesa} ;;
+    dri|nvidia) MICRODUCK_MUJOCO_GL=egl ;;
+esac
+export MICRODUCK_BODY_HOST MICRODUCK_MUJOCO_GL
+say "mode: $SIM_MODE; GPU: $GPU; headless: $HEADLESS; render: ${RENDER_WIDTH}x${RENDER_HEIGHT} @ ${RENDER_FPS} FPS"
 docker info >/dev/null 2>&1 || die "Docker is not running or is not reachable"
-mkdir -p "$RUNTIME_DIR/jobs"
+mkdir -p "$RUNTIME_DIR/jobs" "$SERVICE_MANAGER_DIR"
 ensure_sim_source
 ensure_runtime_volume
 if [ "$action" = monitor ]; then
@@ -350,10 +527,19 @@ trap 'code=$?; if [ "$code" -ne 0 ]; then
         stop_stack
     fi
 fi; exit "$code"' EXIT
-start_body
+if [ "$SIM_MODE" = native ]; then
+    start_native_body
+else
+    start_docker_body
+fi
 start_compose
+start_service_manager
 verify_status
-verify_control
+if [ "$CONTROL_PROBE" = true ]; then
+    verify_control
+else
+    say "control probe skipped"
+fi
 verify_status
 trap - EXIT
 

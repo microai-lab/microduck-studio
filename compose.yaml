@@ -18,7 +18,7 @@ services:
     command:
       - robotd
       - --sim
-      - host.docker.internal:${MICRODUCK_BODY_PORT:-7801}
+      - ${MICRODUCK_BODY_HOST:-host.docker.internal}:${MICRODUCK_BODY_PORT:-7801}
       - --params
       - /config/robotd.toml
       - --socket
@@ -48,7 +48,7 @@ services:
       MICRODUCK_REPO: /repos/microduck
       MICRODUCK_RL_REPO: /repos/microduck_rl
       MICRODUCK_ROBOTD_SOCKET: /runtime/robotd.sock
-      MICRODUCK_BODY_HOST: host.docker.internal
+      MICRODUCK_BODY_HOST: ${MICRODUCK_BODY_HOST:-host.docker.internal}
       MICRODUCK_BODY_PORT: ${MICRODUCK_BODY_PORT:-7801}
       MICRODUCK_STUDIO_HOST: 0.0.0.0
       MICRODUCK_STUDIO_PORT: 8090
@@ -66,6 +66,7 @@ services:
       - ${MICRODUCK_REPO:-../microduck}:/repos/microduck:ro
       - ${MICRODUCK_RL_REPO:-../microduck_rl}:/repos/microduck_rl:ro
       - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/jobs:/state/jobs
+      - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/services:/state/services
     healthcheck:
       test:
         - CMD
@@ -88,11 +89,31 @@ services:
   mujoco-headless:
     profiles: [headless]
     image: microduck-studio-mujoco:local
+    container_name: microduck-studio-mujoco
     build:
       context: .
       dockerfile: docker/microduck-rl/Dockerfile
       additional_contexts:
         microduck_rl_source: ${MICRODUCK_RL_REPO:-../microduck_rl}
+    command:
+      - --keyframe
+      - HOME
+      - --host
+      - 0.0.0.0
+      - --port
+      - ${MICRODUCK_BODY_PORT:-7801}
+      - --headless
+      - --render
+      - --render-width
+      - ${MICRODUCK_RENDER_WIDTH:-1280}
+      - --render-height
+      - ${MICRODUCK_RENDER_HEIGHT:-720}
+      - --render-fps
+      - ${MICRODUCK_RENDER_FPS:-24}
+      - --render-quality
+      - ${MICRODUCK_RENDER_QUALITY:-95}
+    environment:
+      MUJOCO_GL: ${MICRODUCK_MUJOCO_GL:-osmesa}
     ports:
       - 127.0.0.1:${MICRODUCK_BODY_PORT:-7801}:7801
     restart: "no"
