@@ -142,8 +142,10 @@ cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
-打开 **http://127.0.0.1:8090**。该命令会启动原生 MuJoCo Viewer、支持仿真的 `robotd`
-以及 Studio，最后通过移动仿真机器人验证完整控制链路。仅能打开网页不代表已经就绪；请等待：
+打开 **http://127.0.0.1:8090**。默认 `native` 模式会在 macOS 后台启动 MuJoCo，以获得
+流畅的原生 OpenGL 离屏渲染，但不会弹出桌面 Viewer；支持仿真的 `robotd` 与 Studio 在
+Docker 中运行。启动器最后通过移动仿真机器人验证完整控制链路。仅能打开网页不代表已经
+就绪；请等待：
 
 ```text
 control probe passed: MuJoCo moved ... m
@@ -157,7 +159,7 @@ control probe passed: MuJoCo moved ... m
 | 能力 | 内容 |
 |---|---|
 | Web 控制 | 适合手机操作的移动、启用/停止、坐下/站起、前滚翻和踢球 |
-| 实时可见性 | 运行时、仿真器、仓库、策略、任务及连接状态 |
+| 实时可见性 | 浏览器内 MuJoCo 画面、机器人遥测、仓库/任务状态及模型发现 |
 | 安全编排 | Docker Compose 生命周期、端到端控制探测和白名单 RL 冒烟测试 |
 
 运动控制始终使用一个持久 `robotd` 连接。松开控件、隐藏页面、连接断开或 Studio 关闭时
@@ -170,11 +172,27 @@ control probe passed: MuJoCo moved ... m
 | 目的 | 命令 |
 |---|---|
 | 启动或干净重启全部服务，并验证控制链路 | `./scripts/dev-stack.sh` |
+| 默认在后台运行本机 MuJoCo | `./scripts/dev-stack.sh` |
+| 显式打开桌面 MuJoCo Viewer | `./scripts/dev-stack.sh --viewer` |
+| 启动但不执行仿真移动探针 | `./scripts/dev-stack.sh --skip-control-probe` |
+| 最后页面关闭 10 秒后停止后台 MuJoCo | `./scripts/dev-stack.sh --stop-on-browser-close` |
+| 启动全容器 CPU 渲染链路 | `./scripts/dev-stack.sh --sim-mode docker --gpu none` |
+| 使用 Linux DRI/EGL GPU 透传 | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` |
+| 使用 Linux NVIDIA/EGL GPU 透传 | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` |
 | 联合检查 Studio、`robotd` 和 MuJoCo | `./scripts/dev-stack.sh status` |
 | 在当前终端打开实时监控 | `./scripts/dev-stack.sh monitor` |
 | 仅停止该开发链路 | `./scripts/dev-stack.sh stop` |
 
-关闭 MuJoCo 窗口会停止仿真器，而且不会触发自动重启。再次执行启动命令即可恢复完整链路。
+状态卡中的 `robotd` 与 MuJoCo 按钮会随连接状态显示“启动”或“重启”。按钮通过启动器创建的
+受限宿主机管理器执行固定操作，不接受任意命令；重启 MuJoCo 时会等待端口恢复并连带重启
+robotd。网页服务本身停止时按钮不可用，仍需执行 `./scripts/dev-stack.sh`。
+
+只有显式使用 `--viewer` 时才会打开桌面窗口；关闭该窗口会停止仿真器，可以使用状态卡中的
+“启动”按钮恢复。默认后台模式仍使用同一份本机权威世界和离屏渲染。
+
+使用 `--stop-on-browser-close` 后，最后一个场景 WebSocket 持续断开 10 秒便只停止 MuJoCo；
+宽限期内刷新或重新连接会取消退出。未指定该参数时，后台 MuJoCo 会一直运行，直到执行
+`dev-stack.sh stop`。`--headless` 仍作为默认行为的兼容显式写法保留。
 
 ## `robotctl monitor`
 
@@ -224,7 +242,12 @@ duck-body / MuJoCo ────────────────────�
 - **microduck_rl** 负责 MuJoCo 模型、环境、奖励、训练和 ONNX 导出。
 - **microduck-studio** 负责浏览器体验、状态聚合和经过白名单限制的本地编排。
 
-运行时和训练项目都不依赖 Studio；Studio 只使用它们公开的协议和工具。
+运行时和训练项目都不依赖 Studio；Studio 只使用它们公开的协议和工具。浏览器场景由
+`duck-body` 在世界锁内快速复制权威 `MjData`，然后在锁外完成渲染和 JPEG 编码；Studio
+只长轮询缓存帧并转发给浏览器。因此动态物体、接触和其他场景元素都来自实际物理世界，
+不再是根据遥测重建的姿态镜像。
+在浏览器场景中拖动可旋转权威 MuJoCo 相机，使用鼠标滚轮或触控板可缩放，双击可恢复
+默认视角。
 
 ### `robotd --sim` 的作用
 
@@ -248,15 +271,28 @@ duck-body / MuJoCo ────────────────────�
 ```text
 docker/
 ├── microduck/       # robotd 与 robotctl 运行镜像
-├── microduck-rl/    # 可选的 Linux/无窗口 MuJoCo 镜像
-└── studio/          # Studio Web 镜像
-compose.yaml         # robotd、Studio、robotctl 与无窗口 MuJoCo 服务
+├── microduck-rl/    # 无窗口权威 MuJoCo 渲染镜像
+└── studio/          # Studio Web 与画面代理镜像
+compose.yaml             # 基础服务与 CPU 渲染
+compose.gpu-dri.yaml     # Linux /dev/dri + EGL 覆盖配置
+compose.gpu-nvidia.yaml  # Linux NVIDIA + EGL 覆盖配置
 ```
 
-一键启动器使用 `docker compose up`、`down` 和 `run` 隔离 `robotd` 与 Studio Web；因此
-使用该脚本时仍需启动 Docker。Docker 不是各组件单独运行的硬性依赖。Docker 容器无法直接
-显示这套 macOS 原生 GUI，因此默认链路中的 MuJoCo Viewer 仍是宿主机进程。
-`mujoco-headless` profile 用于 Linux/CI，不替代默认的 macOS Viewer。
+不带参数时始终使用 macOS 原生权威渲染器，但在后台运行且不打开 Viewer；需要桌面 Viewer
+时显式传入 `--viewer`。Docker/GPU
+模式只能通过命令行参数选择，确保当前硬件模式清楚地留在 Shell 历史中。
+`--sim-mode docker` 会把 `duck-body` 也放入 Compose。macOS Docker Desktop 不支持
+Linux GPU 透传，因此其
+OSMesa 渲染能保持场景一致，但速度较慢；流畅演示请使用 native 模式。Linux 主机上，
+必须显式传入 `--gpu dri` 才会映射 `/dev/dri`，或传入 `--gpu nvidia` 申请 `gpus: all`；
+两者使用相同的 EGL
+画面协议和网页界面。
+
+浏览器默认使用**清晰**档，并根据实际 CSS 尺寸乘以屏幕像素倍率请求画面。**流畅**档上限为
+`960x540`、JPEG 质量 82；**清晰**档上限为 `1920x1080`、JPEG 质量 95；**无损**档上限为
+`1920x1080`、PNG。启动阶段的回退画面为 `1280x720`、24 FPS、JPEG 质量 95，可通过
+`MICRODUCK_RENDER_WIDTH`、`MICRODUCK_RENDER_HEIGHT`、`MICRODUCK_RENDER_FPS` 与
+`MICRODUCK_RENDER_QUALITY` 覆盖；`MICRODUCK_MUJOCO_GL` 可显式指定 MuJoCo GL 后端。
 
 ### 诊断命令
 
@@ -278,7 +314,7 @@ docker compose run --rm --no-deps robotctl health
 ```bash
 ./scripts/dev-stack.sh stop
 cd ../microduck_rl
-uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801
+uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801 --render
 ```
 
 关闭 Viewer 或按 `Ctrl-C` 即可停止。该模式会提供仿真器 TCP 端点，但不会启动 `robotd`

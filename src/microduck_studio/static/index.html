@@ -3,57 +3,147 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-    <meta name="theme-color" content="#10151f">
+    <meta name="theme-color" content="#0b0f16">
     <title>Microduck Studio</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=workbench-24">
   </head>
   <body>
-    <main>
-      <header>
-        <div><p class="eyebrow">LOCAL DEVELOPMENT COMPANION</p><h1>Microduck Studio</h1></div>
-        <span id="overall" class="pill bilingual"><span id="overall-zh">检查中</span><small id="overall-en" class="label-en">Checking</small></span>
-      </header>
-      <section class="status-grid">
-        <article><span>microduck</span><strong id="repo-runtime">—</strong><small id="repo-runtime-detail"></small></article>
-        <article><span>microduck_rl</span><strong id="repo-rl">—</strong><small id="repo-rl-detail"></small></article>
-        <article><span>robotd</span><strong id="robotd">—</strong><small id="robotd-detail"></small></article>
-        <article><span>MuJoCo body</span><strong id="sim">—</strong><small id="sim-detail"></small></article>
-      </section>
+    <main class="workbench">
+      <aside class="sidebar">
+        <header>
+          <div><p class="eyebrow">MICRODUCK CONTROL ROOM</p><h1>Microduck <span>Studio</span></h1></div>
+          <div class="header-actions"><button id="language-toggle" class="language-toggle" type="button" aria-label="Switch language"><span class="switch-to-en">English</span><span class="switch-to-zh">中文</span></button><span id="overall" class="pill bilingual"><span id="overall-zh">检查中</span><small id="overall-en" class="label-en">Checking</small></span></div>
+        </header>
 
-      <section class="panel controller">
-        <div class="section-title">
-          <h2>机器人自身坐标<small class="label-en">Robot-relative coordinates</small></h2>
-          <span id="control-status" class="bilingual"><span id="control-status-zh">等待操作</span><small id="control-status-en" class="label-en">Waiting for input</small></span>
-        </div>
-        <div class="actions">
-          <button class="primary" data-action="enable"><span>启用 RL / 站起</span><small class="label-en">Enable RL / Stand up</small></button>
-          <button class="danger" data-action="stop"><span>停止</span><small class="label-en">Stop</small></button>
-          <button data-skill="sit_toggle" data-label-zh="坐下 / 起身" data-label-en="Sit / Stand"><span>坐下 / 起身</span><small class="label-en">Sit / Stand</small></button>
-          <button data-skill="roulade" data-label-zh="前滚翻" data-label-en="Forward roll"><span>前滚翻</span><small class="label-en">Forward roll</small></button>
-          <button data-skill="kick_left" data-label-zh="左踢" data-label-en="Kick left"><span>左踢</span><small class="label-en">Kick left</small></button>
-          <button data-skill="kick_right" data-label-zh="右踢" data-label-en="Kick right"><span>右踢</span><small class="label-en">Kick right</small></button>
-        </div>
-        <div class="pad">
-          <button data-vyaw="1.5">↶<small>左转<span class="label-en">Turn left</span></small></button>
-          <button data-vx="0.3">↑<small>前进<span class="label-en">Forward</span></small></button>
-          <button data-vyaw="-1.5">↷<small>右转<span class="label-en">Turn right</span></small></button>
-          <button data-vy="0.3">←<small>左移<span class="label-en">Move left</span></small></button>
-          <button class="danger" data-action="stop">■<small>停止<span class="label-en">Stop</span></small></button>
-          <button data-vy="-0.3">→<small>右移<span class="label-en">Move right</span></small></button>
-          <i></i><button data-vx="-0.3">↓<small>后退<span class="label-en">Backward</span></small></button><i></i>
-        </div>
-        <p class="hint">按住移动、松手停止。方向以鸭子自身朝向为准；不是屏幕坐标。<small class="label-en">Hold to move and release to stop. Directions are relative to the duck, not the screen.</small></p>
-      </section>
+        <section class="status-grid">
+          <article><span>microduck</span><strong id="repo-runtime">—</strong><small id="repo-runtime-detail"></small></article>
+          <article><span>microduck_rl</span><strong id="repo-rl">—</strong><small id="repo-rl-detail"></small></article>
+          <article class="service-card"><span>robotd</span><strong id="robotd">—</strong><small id="robotd-detail"></small><button id="robotd-service-action" class="service-action" data-service="robotd" disabled><span>启动</span><small class="label-en">Start</small></button></article>
+          <article class="service-card"><span>MuJoCo</span><strong id="sim">—</strong><small id="sim-detail"></small><button id="mujoco-service-action" class="service-action" data-service="mujoco" disabled><span>启动</span><small class="label-en">Start</small></button></article>
+        </section>
 
-      <section class="panel training">
-        <div class="section-title">
-          <h2>训练冒烟测试<small class="label-en">Training smoke test</small></h2>
-          <span id="jobs-mode" class="pill bilingual"><span id="jobs-mode-zh">—</span><small id="jobs-mode-en" class="label-en">—</small></span>
+        <section class="panel controller">
+          <div class="section-title">
+            <h2>机器人控制<small class="label-en">Robot control</small></h2>
+            <span id="control-status" class="bilingual"><span id="control-status-zh">等待操作</span><small id="control-status-en" class="label-en">Waiting</small></span>
+          </div>
+          <div class="actions">
+            <button class="primary" data-action="enable"><span>启用 RL / 站起</span><small class="label-en">Enable RL / Stand up</small></button>
+            <button class="danger" data-action="stop"><span>停止</span><small class="label-en">Stop</small></button>
+            <button data-skill="sit_toggle" data-label-zh="坐下 / 起身" data-label-en="Sit / Stand"><span>坐下 / 起身</span><small class="label-en">Sit / Stand</small></button>
+            <button data-skill="roulade" data-label-zh="前滚翻" data-label-en="Forward roll"><span>前滚翻</span><small class="label-en">Forward roll</small></button>
+            <button data-skill="kick_left" data-label-zh="左踢" data-label-en="Kick left"><span>左踢</span><small class="label-en">Kick left</small></button>
+            <button data-skill="kick_right" data-label-zh="右踢" data-label-en="Kick right"><span>右踢</span><small class="label-en">Kick right</small></button>
+          </div>
+          <div class="pad">
+            <button data-vyaw="1.5">↶<small>左转<span class="label-en">Turn left</span></small></button>
+            <button data-vx="0.3">↑<small>前进<span class="label-en">Forward</span></small></button>
+            <button data-vyaw="-1.5">↷<small>右转<span class="label-en">Turn right</span></small></button>
+            <button data-vy="0.3">←<small>左移<span class="label-en">Move left</span></small></button>
+            <button class="danger" data-action="stop">■<small>停止<span class="label-en">Stop</span></small></button>
+            <button data-vy="-0.3">→<small>右移<span class="label-en">Move right</span></small></button>
+            <i></i><button data-vx="-0.3">↓<small>后退<span class="label-en">Backward</span></small></button><i></i>
+          </div>
+          <p class="hint">按住移动，松手停止。方向以鸭子自身朝向为准。<small class="label-en">Hold to move and release to stop. Directions are robot-relative.</small></p>
+        </section>
+
+        <section class="panel training">
+          <div class="section-title">
+            <h2>训练冒烟测试<small class="label-en">Training smoke test</small></h2>
+            <span id="jobs-mode" class="pill bilingual"><span id="jobs-mode-zh">—</span><small id="jobs-mode-en" class="label-en">—</small></span>
+          </div>
+          <form id="smoke-form"><input id="task-id" placeholder="任务 ID / TASK_ID" autocomplete="off"><button class="primary"><span>64 环境 · 5 次迭代</span><small class="label-en">64 envs · 5 iterations</small></button></form>
+          <div id="jobs" class="jobs"><p class="muted">还没有 Studio 启动的训练任务。<small class="label-en">No training jobs started by Studio.</small></p></div>
+        </section>
+      </aside>
+
+      <section class="stage">
+        <div class="simulator-panel">
+          <div class="stage-title">
+            <div class="sim-heading"><p class="eyebrow">LIVE PHYSICS</p><div class="sim-heading-row"><h2>MuJoCo 场景<small class="label-en">MuJoCo scene</small></h2><div class="sim-camera-hint"><span>拖动旋转 · 滚轮缩放 · 双击复位</span><small class="label-en">Drag · Zoom · Reset</small></div></div></div>
+            <span id="sim-stream-status" class="pill bilingual"><span id="sim-stream-status-zh">连接中</span><small id="sim-stream-status-en" class="label-en">Connecting</small></span>
+          </div>
+          <div class="simulator-viewport">
+            <img id="sim-frame" alt="MuJoCo 实时仿真画面">
+            <div id="sim-placeholder" class="sim-placeholder"><span class="duck-mark">◒</span><strong>等待 MuJoCo 画面</strong><small>Waiting for MuJoCo frames</small></div>
+            <label class="sim-quality-control"><span>画质</span><select id="sim-quality" aria-label="MuJoCo 画质"><option value="smooth" data-zh="流畅" data-en="Smooth">流畅</option><option value="clear" data-zh="清晰" data-en="Clear" selected>清晰</option><option value="lossless" data-zh="无损" data-en="Lossless">无损</option></select></label>
+            <div class="sim-overlay"><span id="sim-clock">t 0.0 s</span><span id="sim-height">z 0.000 m</span><span id="sim-resolution">—×—</span></div>
+          </div>
         </div>
-        <form id="smoke-form"><input id="task-id" placeholder="任务 ID / TASK_ID" autocomplete="off"><button class="primary"><span>64 个环境 · 5 次迭代</span><small class="label-en">64 envs · 5 iterations</small></button></form>
-        <div id="jobs" class="jobs"><p class="muted">还没有 Studio 启动的训练任务。<small class="label-en">No training jobs have been started by Studio.</small></p></div>
+
+        <section class="monitor-panel">
+          <div class="stage-title">
+            <div><p class="eyebrow">ROBOTD TELEMETRY</p><h2>实时监视器<small class="label-en">Live robot monitor</small></h2></div>
+            <span id="monitor-status" class="pill bilingual"><span id="monitor-status-zh">连接中</span><small id="monitor-status-en" class="label-en">Connecting</small></span>
+          </div>
+          <div class="robotd-monitor">
+            <div class="robotd-monitor-main">
+              <section class="terminal-block robot-status-block">
+                <div class="terminal-legend">
+                  <span>policy <strong id="monitor-policy">—</strong></span>
+                  <span>· t <strong id="monitor-time">—</strong> s</span>
+                  <span>· <strong id="monitor-loop">—</strong> Hz</span>
+                  <span>· missed <strong id="monitor-missed">—</strong></span>
+                </div>
+                <div class="robot-status-grid">
+                  <div class="terminal-readout">
+                    <div class="readout-head"><span>move</span><span>asked</span><span>applied</span><span></span></div>
+                    <div><span>vx&nbsp;&nbsp; forward</span><b id="monitor-vx-asked">—</b><b id="monitor-vx-applied">—</b><small>m/s</small></div>
+                    <div><span>vy&nbsp;&nbsp; left</span><b id="monitor-vy-asked">—</b><b id="monitor-vy-applied">—</b><small>m/s</small></div>
+                    <div><span>vyaw turn left</span><b id="monitor-vyaw-asked">—</b><b id="monitor-vyaw-applied">—</b><small>°/s</small></div>
+                  </div>
+                  <div class="terminal-readout imu-readout">
+                    <div class="readout-head"><span>imu · gravity in the trunk frame</span></div>
+                    <div><span>x forward</span><b id="monitor-gravity-x">—</b></div>
+                    <div><span>y left</span><b id="monitor-gravity-y">—</b></div>
+                    <div><span>z up</span><b id="monitor-gravity-z">—</b><strong id="monitor-upright">—</strong></div>
+                  </div>
+                </div>
+                <div class="terminal-lines">
+                  <div><span>limits</span><strong id="monitor-limits">—</strong></div>
+                  <div><span>head</span><strong id="monitor-head">—</strong></div>
+                  <div><span>odom</span><strong id="monitor-odom">—</strong></div>
+                  <div><span>power</span><strong id="monitor-power">asking robotd for the battery…</strong></div>
+                  <div class="policy-files"><span>policy</span><strong id="monitor-policy-files">waiting for subscription…</strong></div>
+                </div>
+              </section>
+
+              <section class="terminal-block joints-block">
+                <div class="terminal-legend"><span>joints</span><small>degrees · bar reaches ±11.5°</small></div>
+                <div class="joint-grid joint-grid-head"><span>joint</span><span>measured</span><span>commanded</span><span>error</span><span>deviation</span></div>
+                <div id="monitor-joints" class="joint-rows"><p class="muted">等待 robot.state / Waiting for robot.state</p></div>
+              </section>
+
+              <section class="terminal-block loop-block">
+                <div class="terminal-legend"><span id="monitor-loop-caption">loop rate</span><small>newest right</small></div>
+                <div id="monitor-loop-trace" class="loop-trace" aria-label="Control loop history"></div>
+              </section>
+            </div>
+
+            <aside class="robotd-monitor-side">
+              <section class="terminal-block robot-view-block">
+                <div class="terminal-legend"><span>robot</span></div>
+                <div class="monitor-robot-view">
+                  <img id="monitor-robot-frame" alt="Robot authoritative MuJoCo view">
+                  <span id="monitor-robot-placeholder">等待权威画面<br><small>Waiting for authoritative view</small></span>
+                </div>
+              </section>
+              <section class="terminal-block path-block">
+                <div class="terminal-legend"><span>path</span></div>
+                <svg id="monitor-path" viewBox="0 0 320 190" role="img" aria-label="Robot odometry path">
+                  <line x1="20" y1="95" x2="300" y2="95" class="path-axis"></line>
+                  <line x1="160" y1="15" x2="160" y2="175" class="path-axis"></line>
+                  <polyline id="monitor-path-line" points="" class="path-line"></polyline>
+                  <circle id="monitor-path-origin" cx="160" cy="95" r="3" class="path-origin"></circle>
+                  <path id="monitor-path-heading" d="M160 87 L154 101 L166 101 Z" class="path-heading"></path>
+                </svg>
+                <small id="monitor-path-scale" class="path-scale">1.0 m across</small>
+              </section>
+            </aside>
+          </div>
+        </section>
       </section>
     </main>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=workbench-24"></script>
   </body>
 </html>

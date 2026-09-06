@@ -1,0 +1,7 @@
+services:
+  mujoco-headless:
+    gpus: all
+    environment:
+      MUJOCO_GL: egl
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: graphics,utility,compute

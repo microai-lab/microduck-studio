@@ -149,9 +149,10 @@ cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
-Open **http://127.0.0.1:8090**. The command starts the native MuJoCo Viewer, a simulation-enabled
-`robotd`, and Studio, then proves the complete control path by moving the simulated robot. Do not
-treat a reachable page alone as ready; wait for:
+Open **http://127.0.0.1:8090**. The default `native` mode starts MuJoCo in the macOS background for
+smooth native OpenGL offscreen rendering without opening the desktop Viewer. A simulation-enabled
+`robotd` and Studio run in Docker. The launcher then proves the complete control path by moving the
+simulated robot. Do not treat a reachable page alone as ready; wait for:
 
 ```text
 control probe passed: MuJoCo moved ... m
@@ -165,7 +166,7 @@ control probe passed: MuJoCo moved ... m
 | Area | Included |
 |---|---|
 | Web control | Phone-friendly movement, enable/stop, sit/stand, roulade, and kicks |
-| Live visibility | Runtime, simulator, repository, job, and connection status, plus model discovery |
+| Live visibility | Browser-rendered MuJoCo scene, robot telemetry, repository/job status, and model discovery |
 | Safe orchestration | Docker Compose lifecycle, an end-to-end control probe, and allowlisted RL smoke tests |
 
 Motion uses one persistent `robotd` connection. Releasing a control, hiding the page, disconnecting,
@@ -178,12 +179,30 @@ Run these commands from `microduck-studio`:
 | Goal | Command |
 |---|---|
 | Start or cleanly restart everything and verify control | `./scripts/dev-stack.sh` |
+| Run native MuJoCo in the background (default) | `./scripts/dev-stack.sh` |
+| Explicitly open the desktop MuJoCo Viewer | `./scripts/dev-stack.sh --viewer` |
+| Start without the simulated movement probe | `./scripts/dev-stack.sh --skip-control-probe` |
+| Stop background MuJoCo 10 s after the last page closes | `./scripts/dev-stack.sh --stop-on-browser-close` |
+| Start the fully containerized CPU renderer | `./scripts/dev-stack.sh --sim-mode docker --gpu none` |
+| Use Linux DRI/EGL GPU passthrough | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` |
+| Use Linux NVIDIA/EGL GPU passthrough | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` |
 | Check Studio, `robotd`, and MuJoCo together | `./scripts/dev-stack.sh status` |
 | Open the live terminal monitor | `./scripts/dev-stack.sh monitor` |
 | Stop only this development stack | `./scripts/dev-stack.sh stop` |
 
-Closing the MuJoCo window stops the simulator and does not trigger an automatic restart. Run the
-start command again to restore the complete stack.
+The `robotd` and MuJoCo status cards show Start or Restart according to connection state. These
+buttons use a restricted host manager created by the launcher; it accepts only fixed service
+operations. Restarting MuJoCo waits for its port and then restarts robotd as well. If the Web
+service itself is down, use `./scripts/dev-stack.sh` because the buttons are not reachable.
+
+Only `--viewer` opens the desktop window. Closing that window stops the simulator; use the Start
+button on its status card to restore it. The default background mode uses the same native
+authoritative world and offscreen renderer.
+
+Add `--stop-on-browser-close` to stop only MuJoCo after the final scene WebSocket remains
+disconnected for 10 seconds. A page refresh or reconnect inside that grace period cancels the
+shutdown. Without this option, background MuJoCo continues until `dev-stack.sh stop`. `--headless`
+remains available as an explicit compatibility spelling of the default behavior.
 
 ## `robotctl monitor`
 
@@ -236,6 +255,12 @@ duck-body / MuJoCo ────────────────────�
   orchestration.
 
 Neither runtime nor training depends on Studio. Studio consumes their public protocols and tools.
+For the browser scene, `duck-body` snapshots its authoritative `MjData` under the world lock, then
+renders and JPEG-encodes outside that lock. Studio only long-polls the cached frame and proxies it
+to the browser. Dynamic objects, contacts, and every other scene element therefore come from the
+same world as the physics rather than from a reconstructed pose mirror.
+Drag the browser scene to orbit the authoritative MuJoCo camera, use the mouse wheel or trackpad
+to zoom, and double-click to restore the default view.
 
 ### What `robotd --sim` does
 
@@ -260,16 +285,29 @@ All project-owned container definitions live here and are separated by component
 ```text
 docker/
 ├── microduck/       # robotd + robotctl runtime image
-├── microduck-rl/    # optional Linux/headless MuJoCo image
-└── studio/          # Studio web image
-compose.yaml         # robotd, Studio, robotctl, and headless MuJoCo services
+├── microduck-rl/    # headless authoritative MuJoCo renderer image
+└── studio/          # Studio web and frame proxy image
+compose.yaml             # base services and CPU renderer
+compose.gpu-dri.yaml     # Linux /dev/dri + EGL override
+compose.gpu-nvidia.yaml  # Linux NVIDIA + EGL override
 ```
 
-The one-command launcher uses `docker compose up`, `down`, and `run` to isolate `robotd` and Studio
-Web, so Docker must be running when that script is used. Docker is not mandatory when the
-components are run separately. Containers cannot display this native macOS GUI directly, so the
-default MuJoCo Viewer remains a host process. The `mujoco-headless` profile is for Linux/CI and does
-not replace the default macOS Viewer.
+The no-argument default uses the native macOS authoritative renderer in the background without a
+Viewer window; pass `--viewer` to open it explicitly. Docker/GPU selection is intentionally
+command-line-only so the active hardware
+mode remains visible in shell history. The `--sim-mode docker` mode also moves `duck-body` into
+Compose. Docker Desktop on macOS has no Linux
+GPU passthrough, so its OSMesa renderer is scene-faithful but slow; use the native mode for a smooth
+demo. On a Linux host, explicitly passing `--gpu dri` maps `/dev/dri`, while `--gpu nvidia`
+requests `gpus: all`; both use
+the same EGL render protocol and browser UI.
+
+The browser defaults to the **Clear** profile and requests its actual CSS size multiplied by the
+display pixel ratio. **Smooth** caps the stream at `960x540` with JPEG quality 82, **Clear** caps
+it at `1920x1080` with JPEG quality 95, and **Lossless** caps it at `1920x1080` with PNG. The
+startup fallback is `1280x720`, 24 FPS, JPEG quality 95. Override that fallback with
+`MICRODUCK_RENDER_WIDTH`, `MICRODUCK_RENDER_HEIGHT`, `MICRODUCK_RENDER_FPS`, and
+`MICRODUCK_RENDER_QUALITY`. `MICRODUCK_MUJOCO_GL` can explicitly select a MuJoCo GL backend.
 
 ### Diagnostics
 
@@ -292,7 +330,7 @@ repository:
 ```bash
 ./scripts/dev-stack.sh stop
 cd ../microduck_rl
-uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801
+uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801 --render
 ```
 
 Close the Viewer or press `Ctrl-C` to stop it. This mode exposes the simulator TCP endpoint but

@@ -1,0 +1,6 @@
+services:
+  mujoco-headless:
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      MUJOCO_GL: egl
