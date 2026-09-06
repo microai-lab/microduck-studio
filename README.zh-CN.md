@@ -194,6 +194,47 @@ robotd。网页服务本身停止时按钮不可用，仍需执行 `./scripts/de
 宽限期内刷新或重新连接会取消退出。未指定该参数时，后台 MuJoCo 会一直运行，直到执行
 `dev-stack.sh stop`。`--headless` 仍作为默认行为的兼容显式写法保留。
 
+### 如何选择渲染模式
+
+本机 macOS 开发时，请使用默认命令；这是没有 Linux GPU 主机时唯一面向流畅本地演示的模式：
+
+| 场景 | 命令 | 渲染器与预期效果 |
+|---|---|---|
+| macOS 本地开发（推荐） | `./scripts/dev-stack.sh` | macOS 原生离屏 OpenGL；权威 MuJoCo 世界在后台运行，桌面 Viewer 不会打开。 |
+| 检查原生 Viewer | `./scripts/dev-stack.sh --viewer` | 对同一仿真服务打开桌面 Viewer；关闭窗口会停止 MuJoCo。 |
+| macOS Docker Desktop 或纯 CPU CI | `./scripts/dev-stack.sh --sim-mode docker --gpu none` | Docker 内的 OSMesa 软件渲染。物理和场景状态仍来自权威世界，但视频流可能较慢。 |
+| 配有集显/AMD/Intel GPU 的 Linux 主机 | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` | 将 `/dev/dri` 映射到 MuJoCo 容器并使用 EGL。 |
+| 已安装 NVIDIA Container Toolkit 的 Linux 主机 | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` | 请求 `gpus: all` 并使用 EGL。 |
+
+`dri` 是 Linux 的 Direct Rendering Infrastructure（直接渲染基础设施）：它通过主机 GPU
+设备文件提供访问，而不是另一套 GPU API。macOS Docker Desktop 不支持这种透传。GPU 选项必须
+显式写在命令行中，因此可从 Shell 历史清楚地看到使用了哪条硬件路径。`--gpu` 仅可与
+`--sim-mode docker` 同用；`--viewer` 和 `--stop-on-browser-close` 属于 native 模式，后者还要求
+以后台/headless 方式运行。
+
+### 网页工作台说明
+
+页面包含三个实时区域，它们的数据权威各不相同：
+
+| 区域 | 数据来源 | 可执行操作 |
+|---|---|---|
+| **MuJoCo 场景** | `duck-body` 从权威 `MjModel` 与 `MjData` 快照渲染出的缓存 JPEG/PNG 帧 | 拖动旋转、滚轮或触控板缩放、双击复位。操作的是权威相机，不是浏览器端重建的姿态。 |
+| **ROBOTD TELEMETRY** | Studio 经持久本地 socket 连接读取 `robotd` monitor 协议 | 查看策略、命令、IMU、里程计、关节目标/偏差、机器人缩略图和循环频率。这是 robotd 遥测的 Web 呈现，不是另一套控制循环。 |
+| **控制与服务卡片** | `robotd` JSON-RPC 与启动器安装的固定操作服务管理器 | 发送移动意图、启用/停止技能；当启动器正在运行时，可启动/重启 `robotd` 或 MuJoCo。 |
+
+使用页面顶部的语言切换选择中文或英文。它只改变界面文字，不会改变服务、策略或数值单位。
+场景卡片还可以选择画质档位：
+
+| 档位 | 最大画面尺寸 | 编码 | 适用情况 |
+|---|---:|---|---|
+| 流畅 | 960×540 | JPEG，质量 82 | 带宽和延迟要求最低。 |
+| 清晰（默认） | 1920×1080 | JPEG，质量 95 | 常规桌面使用。 |
+| 无损 | 1920×1080 | PNG | 适合静态检查，帧率可能明显降低。 |
+
+浏览器会按场景 CSS 尺寸乘以屏幕像素倍率请求画面，再受当前档位的上限约束，从而避免高密度屏幕
+上被低分辨率视频放大后的模糊感。场景内容和仿真时间来自同一个 MuJoCo 权威世界；不同操作系统、
+GL 驱动或 GPU 型号之间不承诺逐像素完全一致。
+
 ## `robotctl monitor`
 
 推荐命令会直接在当前终端打开实时可视化监控：
@@ -303,6 +344,16 @@ docker compose run --rm --no-deps robotctl health
 ```
 
 最后一条命令会运行临时工具容器，不会打开 Docker Shell。
+
+### 常见启动和显示问题
+
+| 现象 | 检查与恢复方式 |
+|---|---|
+| 场景一直显示“等待 MuJoCo 画面” | 执行 `./scripts/dev-stack.sh status`，再检查 `.studio-runtime/dev-stack/mujoco.log`。Studio 在线时可使用 MuJoCo 卡片的启动/重启；网页无法打开时重新执行 `./scripts/dev-stack.sh`。 |
+| 控制操作没有让仿真机器人移动 | 确认三个状态卡片都已连接，点击**启用 RL**，然后不要使用 `--skip-control-probe`，重新执行默认启动命令。只有完整控制链路确实移动机器人后，启动器才会报告 `control probe passed`。 |
+| Docker 模式下场景很卡 | macOS 请使用默认 native 模式；Docker 内的 OSMesa 是 CPU 渲染。在支持的 Linux 主机上使用显式 `dri` 或 `nvidia` GPU 模式。优先切换为**流畅**档，而不是降低权威物理频率。 |
+| 意外弹出了 MuJoCo 桌面窗口 | 仅传入 `--viewer` 才会打开 Viewer。请停止后使用 `./scripts/dev-stack.sh` 重启，它默认在后台运行。 |
+| 启动/重启按钮不可用 | 这些按钮只会在 `dev-stack.sh` 安装本地白名单服务管理器后启用；它们不能启动 Studio Web 服务本身，此时应在终端重新启动整套服务。 |
 
 ### 分别运行组件
 

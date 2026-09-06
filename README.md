@@ -204,6 +204,50 @@ disconnected for 10 seconds. A page refresh or reconnect inside that grace perio
 shutdown. Without this option, background MuJoCo continues until `dev-stack.sh stop`. `--headless`
 remains available as an explicit compatibility spelling of the default behavior.
 
+### Choose a rendering mode
+
+Use the default command for a local macOS development machine. It is the only mode intended for a
+smooth local demo without a Linux GPU host:
+
+| Situation | Command | Renderer and expected result |
+|---|---|---|
+| macOS local development (recommended) | `./scripts/dev-stack.sh` | Native macOS offscreen OpenGL; the authoritative MuJoCo world runs in the background and the desktop Viewer stays closed. |
+| Inspect the native Viewer | `./scripts/dev-stack.sh --viewer` | Opens the desktop Viewer against the same simulation service; closing it stops MuJoCo. |
+| Docker Desktop on macOS or CPU-only CI | `./scripts/dev-stack.sh --sim-mode docker --gpu none` | Dockerized OSMesa software renderer. Physics and scene state remain authoritative, but the video stream can be slow. |
+| Linux host with an integrated/AMD/Intel GPU | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` | Maps `/dev/dri` into the MuJoCo container and uses EGL. |
+| Linux host with NVIDIA Container Toolkit | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` | Requests `gpus: all` and uses EGL. |
+
+`dri` is Linux Direct Rendering Infrastructure: access to the host GPU device files rather than a
+separate GPU API. It is not available through Docker Desktop on macOS. GPU choices are explicit
+command-line arguments, so a shell history shows exactly which hardware path was used. `--gpu` is
+valid only with `--sim-mode docker`; `--viewer` and `--stop-on-browser-close` are native-mode
+options, and the latter requires background/headless operation.
+
+### Web workspace guide
+
+The page has three live surfaces with deliberately different sources of truth:
+
+| Surface | Source | What you can do |
+|---|---|---|
+| **MuJoCo scene** | Cached JPEG/PNG frames rendered by `duck-body` from its authoritative `MjModel` and `MjData` snapshot | Drag to orbit, use the wheel or trackpad to zoom, and double-click to reset. The controls update the authoritative camera, not a browser-side pose reconstruction. |
+| **ROBOTD TELEMETRY** | The `robotd` monitor protocol via Studio's persistent local socket connection | Inspect policy, commands, IMU, odometry, joint targets/errors, robot thumbnail, and loop rate. It is a Web rendition of robotd telemetry, not an independent control loop. |
+| **Control and service cards** | `robotd` JSON-RPC plus the launcher-installed, fixed-operation service manager | Send motion intents, enable/stop skills, and Start/Restart `robotd` or MuJoCo when the launcher is running. |
+
+Use the language switch in the page header to choose Chinese or English. It changes UI labels only;
+the underlying service, policy, and unit values do not change. Frame profiles are also selected in
+the scene card:
+
+| Profile | Maximum frame size | Encoding | When to use it |
+|---|---:|---|---|
+| Smooth | 960×540 | JPEG, quality 82 | Lowest bandwidth and latency. |
+| Clear (default) | 1920×1080 | JPEG, quality 95 | Normal desktop use. |
+| Lossless | 1920×1080 | PNG | Still inspection; it may reduce frame rate considerably. |
+
+The browser asks for the scene's CSS size multiplied by the display pixel ratio, then the selected
+profile applies its cap. This avoids a blurry low-resolution stream on high-density displays.
+Scene content and simulation time are identical to the MuJoCo authority; pixel-for-pixel equality
+between different operating systems, GL drivers, or GPU vendors is not promised.
+
 ## `robotctl monitor`
 
 The recommended command opens the live visual monitor directly in the current terminal:
@@ -318,6 +362,16 @@ docker compose run --rm --no-deps robotctl health
 ```
 
 The final command runs a temporary tool container; it does not open a Docker shell.
+
+### Common startup and display problems
+
+| Symptom | Check and recovery |
+|---|---|
+| The scene stays on “Waiting for MuJoCo frames” | Run `./scripts/dev-stack.sh status`, then inspect `.studio-runtime/dev-stack/mujoco.log`. Use the MuJoCo card's Start/Restart action when Studio is online, or run `./scripts/dev-stack.sh` again if the page is unavailable. |
+| Controls do not move the simulated robot | Confirm all three status cards are connected, click **Enable RL**, then run the default launcher without `--skip-control-probe`. The launcher reports `control probe passed` only after the whole control path moved the robot. |
+| The Docker scene is choppy | On macOS, use the default native mode. OSMesa inside Docker is CPU rendering. On a supported Linux host, use the explicit `dri` or `nvidia` GPU mode. Reduce the profile to **Smooth** before reducing the authoritative physics rate. |
+| A desktop MuJoCo window appeared unexpectedly | The Viewer opens only when `--viewer` was supplied. Stop the stack and restart with `./scripts/dev-stack.sh`; that is the default background mode. |
+| Start/Restart buttons are unavailable | They are intentionally available only after `dev-stack.sh` has installed its local, allowlisted service manager. They cannot start the Studio Web service itself; restart the stack from a terminal for that case. |
 
 ### Run components separately
 
