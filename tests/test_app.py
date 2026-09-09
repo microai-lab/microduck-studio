@@ -33,6 +33,9 @@ def test_index_is_served(tmp_path):
         assert "实时监视器" in response.text
         assert "Live robot monitor" in response.text
         assert "/static/styles.css?v=workbench-24" in response.text
+        assert "/static/app.js?v=workbench-25" in response.text
+        assert 'data-placeholder-zh="任务 ID"' in response.text
+        assert 'data-placeholder-en="TASK_ID"' in response.text
         assert "loop rate" in response.text
         assert "degrees · bar reaches ±11.5°" in response.text
         assert 'data-service="robotd"' in response.text

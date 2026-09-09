@@ -53,6 +53,9 @@ function setInterfaceLanguage(language) {
   document.querySelectorAll('#sim-quality option').forEach(option => {
     option.textContent = option.dataset[interfaceLanguage] || option.textContent;
   });
+  document.querySelectorAll('[data-placeholder-zh][data-placeholder-en]').forEach(input => {
+    input.placeholder = input.dataset[`placeholder${interfaceLanguage === 'en' ? 'En' : 'Zh'}`];
+  });
   void refreshJobs();
 }
 
