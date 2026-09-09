@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/microduck-studio-hero-placeholder.png" alt="Microduck Studio 开发工作区预览" width="100%">
+  <img src="docs/images/microduck-studio-demo.jpg" alt="Microduck Studio 在 MuJoCo 中控制机器人并显示 robotd 实时遥测" width="100%">
 </p>
 
 <h1 align="center">Microduck Studio</h1>
@@ -31,10 +31,6 @@
   <a href="#robotctl-monitor">终端监控</a> ·
   <a href="#三个项目如何协作">项目架构</a> ·
   <a href="#页面无法控制机器人时">故障排查</a>
-</p>
-
-<p align="center">
-  <sub>概念预览——这张占位图以后会替换为 Web 界面、<code>robotctl monitor</code> 与 MuJoCo 的真实整合截图。</sub>
 </p>
 
 Microduck Studio 把现有的

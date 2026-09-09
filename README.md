@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/microduck-studio-hero-placeholder.png" alt="Microduck Studio development workspace preview" width="100%">
+  <img src="docs/images/microduck-studio-demo.jpg" alt="Microduck Studio controlling a robot in MuJoCo with live robotd telemetry" width="100%">
 </p>
 
 <h1 align="center">Microduck Studio</h1>
@@ -31,10 +31,6 @@
   <a href="#robotctl-monitor">Monitor</a> ·
   <a href="#how-the-projects-fit-together">Architecture</a> ·
   <a href="#when-the-page-does-not-move-the-robot">Troubleshooting</a>
-</p>
-
-<p align="center">
-  <sub>Concept preview — this placeholder will later be replaced by one real composite of the Web UI, <code>robotctl monitor</code>, and MuJoCo.</sub>
 </p>
 
 Microduck Studio connects the existing
