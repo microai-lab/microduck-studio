@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .config import Settings
 from .discovery import model_catalog, repo_status
 from .jobs import JobManager
@@ -99,7 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await robot.close()
         await jobs.stop_all()
 
-    app = FastAPI(title="Microduck Studio", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Microduck Studio", version=__version__, lifespan=lifespan)
     app.state.settings = settings
     app.state.robot = robot
     app.state.body = body_client
