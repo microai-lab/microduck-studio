@@ -28,8 +28,32 @@ services:
     volumes:
       - runtime:/runtime
       - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/robotd.toml:/config/robotd.toml:ro
+      - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/policies:/opt/robot/policies:ro
     healthcheck:
       test: ["CMD-SHELL", "test -S /runtime/robotd.sock"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+    restart: "no"
+
+  tofd:
+    <<: *microduck-image
+    container_name: microduck-studio-tofd
+    command:
+      - tofd
+      - --sim
+      - ${MICRODUCK_BODY_HOST:-host.docker.internal}:${MICRODUCK_BODY_PORT:-7801}
+      - --config
+      - /config/robotd.toml
+      - --socket
+      - /runtime/tofd.sock
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - runtime:/runtime
+      - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/robotd.toml:/config/robotd.toml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /runtime/tofd.sock"]
       interval: 1s
       timeout: 1s
       retries: 30
@@ -44,16 +68,22 @@ services:
     depends_on:
       robotd:
         condition: service_healthy
+      tofd:
+        condition: service_healthy
     environment:
       MICRODUCK_REPO: /repos/microduck
       MICRODUCK_RL_REPO: /repos/microduck_rl
       MICRODUCK_ROBOTD_SOCKET: /runtime/robotd.sock
+      MICRODUCK_TOFD_SOCKET: /runtime/tofd.sock
       MICRODUCK_BODY_HOST: ${MICRODUCK_BODY_HOST:-host.docker.internal}
       MICRODUCK_BODY_PORT: ${MICRODUCK_BODY_PORT:-7801}
+      MICRODUCK_HEAD_CAMERA_PORT: ${MICRODUCK_HEAD_CAMERA_PORT:-7901}
       MICRODUCK_STUDIO_HOST: 0.0.0.0
       MICRODUCK_STUDIO_PORT: 8090
       MICRODUCK_STUDIO_ENABLE_JOBS: "false"
       MICRODUCK_STUDIO_RUNTIME: /state
+      MICRODUCK_RUNTIME_REF: ${MICRODUCK_RUNTIME_REF:-unknown}
+      MICRODUCK_RUNTIME_REVISION: ${MICRODUCK_RUNTIME_REVISION:-unknown}
       GIT_CONFIG_COUNT: 1
       GIT_CONFIG_KEY_0: core.autocrlf
       GIT_CONFIG_VALUE_0: input
@@ -67,6 +97,7 @@ services:
       - ${MICRODUCK_RL_REPO:-../microduck_rl}:/repos/microduck_rl:ro
       - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/jobs:/state/jobs
       - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/services:/state/services
+      - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/simulator.json:/state/simulator.json:ro
     healthcheck:
       test:
         - CMD
@@ -112,10 +143,17 @@ services:
       - ${MICRODUCK_RENDER_FPS:-24}
       - --render-quality
       - ${MICRODUCK_RENDER_QUALITY:-95}
+      - --cameras
+      - a
+      - --frame-port
+      - ${MICRODUCK_HEAD_CAMERA_PORT:-7901}
     environment:
       MUJOCO_GL: ${MICRODUCK_MUJOCO_GL:-osmesa}
     ports:
       - 127.0.0.1:${MICRODUCK_BODY_PORT:-7801}:7801
+      - 127.0.0.1:${MICRODUCK_HEAD_CAMERA_PORT:-7901}:7901
+    volumes:
+      - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/simulator.json:/config/simulator.json:ro
     restart: "no"
 
 volumes:

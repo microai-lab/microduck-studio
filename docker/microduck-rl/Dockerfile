@@ -17,5 +17,6 @@ ENV MUJOCO_GL=osmesa \
     PYTHONPATH=/workspace/src
 RUN pip install --no-cache-dir "mujoco>=3.3,<4" "numpy>=2,<3" "pillow>=11,<13"
 
-ENTRYPOINT ["python", "-m", "mjlab_microduck.sim.body_server"]
+COPY scripts/run-body.py /usr/local/lib/microduck-studio/run-body.py
+ENTRYPOINT ["python", "/usr/local/lib/microduck-studio/run-body.py", "--config", "/config/simulator.json", "--rl-root", "/workspace"]
 CMD ["--keyframe", "HOME", "--port", "7801"]

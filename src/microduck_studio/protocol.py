@@ -5,6 +5,7 @@ import base64
 import binascii
 import itertools
 import json
+import struct
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -177,6 +178,61 @@ class RobotdMonitor:
                 pass
 
 
+class SensorMonitor:
+    """A dedicated read-only subscription to one of ``tofd``'s sensor streams."""
+
+    STREAMS = {
+        "tof.stream": ("tof.frame", "tof"),
+        "head_imu.stream": ("head_imu.frame", "head-imu"),
+    }
+
+    def __init__(self, socket_path: Path, method: str, timeout: float = 2.0):
+        if method not in self.STREAMS:
+            raise ValueError(f"unsupported sensor stream: {method}")
+        self.socket_path = socket_path
+        self.method = method
+        self.timeout = timeout
+
+    async def messages(self) -> AsyncIterator[dict[str, Any]]:
+        notification, stream_type = self.STREAMS[self.method]
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(self.socket_path), self.timeout
+        )
+        request = {"jsonrpc": "2.0", "id": 1, "method": self.method}
+        writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+        await asyncio.wait_for(writer.drain(), self.timeout)
+
+        try:
+            while True:
+                line = await asyncio.wait_for(reader.readline(), max(self.timeout, 2.0))
+                if not line:
+                    raise ConnectionError("tofd closed the sensor stream")
+                try:
+                    message = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                    raise ProtocolError("invalid tofd sensor message") from error
+                if not isinstance(message, dict):
+                    raise ProtocolError("invalid tofd sensor message")
+                if message.get("id") == 1:
+                    if error := message.get("error"):
+                        raise ProtocolError(error.get("message", str(error)))
+                    result = message.get("result")
+                    if not isinstance(result, dict) or not result.get("accepted"):
+                        raise ProtocolError(f"tofd refused {self.method}")
+                    yield {"type": f"{stream_type}-subscribed", "data": result}
+                elif message.get("method") == notification:
+                    frame = message.get("params")
+                    if not isinstance(frame, dict):
+                        raise ProtocolError(f"invalid {notification} notification")
+                    yield {"type": stream_type, "data": frame}
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except OSError:
+                pass
+
+
 class BodyClient:
     def __init__(self, host: str, port: int, timeout: float = 1.0):
         self.host = host
@@ -276,6 +332,41 @@ class BodyFrameClient:
         if mime == "image/png" and not image.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ProtocolError("invalid simulator PNG frame")
         return SimulatorFrame(seq, sim_time, width, height, mime, backend, image)
+
+
+class HeadCameraClient:
+    """Read the simulated head camera's length-prefixed raw UYVY frames."""
+
+    WIDTH = 640
+    HEIGHT = 360
+    FRAME_BYTES = WIDTH * HEIGHT * 2
+
+    def __init__(self, host: str, port: int, timeout: float = 2.0):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+
+    async def frames(self) -> AsyncIterator[bytes]:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(self.host, self.port), self.timeout
+        )
+        try:
+            while True:
+                header = await asyncio.wait_for(reader.readexactly(4), self.timeout)
+                (length,) = struct.unpack("<I", header)
+                if length != self.FRAME_BYTES:
+                    raise ProtocolError(
+                        f"invalid head camera frame size {length}, expected {self.FRAME_BYTES}"
+                    )
+                yield await asyncio.wait_for(reader.readexactly(length), self.timeout)
+        except asyncio.IncompleteReadError as error:
+            raise ConnectionError("simulator head camera closed the stream") from error
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except OSError:
+                pass
 
 
 class BodyCameraClient:

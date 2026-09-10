@@ -2,6 +2,8 @@ const $ = selector => document.querySelector(selector);
 let moveTimer = null;
 let monitorSocket = null;
 let monitorRetry = null;
+let sensorSocket = null;
+let sensorRetry = null;
 let simulatorSocket = null;
 let simulatorRetry = null;
 let simulatorFrameUrl = null;
@@ -17,6 +19,13 @@ let simulatorOrbitDy = 0;
 let simulatorOrbitFrame = null;
 let simulatorResizeTimer = null;
 let simulatorProfile = localStorage.getItem('microduck-render-profile') || 'clear';
+let headCameraSocket = null;
+let headCameraRetry = null;
+let headCameraMeta = null;
+let headCameraPendingFrame = null;
+let headCameraRenderFrame = null;
+let headCameraFrameTimes = [];
+let currentSimulatorView = 'world';
 let monitorPolicyInfo = null;
 let monitorHealth = null;
 let monitorLoopHistory = [];
@@ -24,8 +33,31 @@ let monitorLoopPeak = 0;
 let monitorFrames = 0;
 let monitorPath = [];
 let latestRobotPolicy = null;
+let latestRobotTNs = 0;
 const serviceOperations = new Set();
 let interfaceLanguage = localStorage.getItem('microduck-studio-language') || 'zh';
+
+const sceneLabels = {
+  'scene.xml': {zh: '标准场景', en: 'Standard'},
+  'scene_allcollisions.xml': {zh: '全身碰撞', en: 'Full collision'},
+  'scene_apartment.xml': {zh: '公寓场景', en: 'Apartment'},
+  'scene_backlash.xml': {zh: '关节回差', en: 'Joint backlash'},
+  'scene_ball.xml': {zh: '足球场景', en: 'Ball'},
+  'scene_rollers.xml': {zh: '滚轮场景', en: 'Rollers'},
+  'scene_vslam.xml': {zh: '视觉定位', en: 'Visual SLAM'},
+  'scene_walk.xml': {zh: '行走模型', en: 'Walking model'},
+  'scene_walk_backlash.xml': {zh: '行走回差', en: 'Walking + backlash'},
+};
+
+function sceneLabel(filename) {
+  return sceneLabels[filename]?.[interfaceLanguage] || (interfaceLanguage === 'en' ? 'Scene' : '场景');
+}
+
+function updateSceneLabels() {
+  document.querySelectorAll('#sim-scene option').forEach(option => {
+    option.textContent = sceneLabel(option.value);
+  });
+}
 
 function markStaticChinese() {
   const walker = document.createTreeWalker(document.querySelector('.workbench'), NodeFilter.SHOW_TEXT);
@@ -53,6 +85,7 @@ function setInterfaceLanguage(language) {
   document.querySelectorAll('#sim-quality option').forEach(option => {
     option.textContent = option.dataset[interfaceLanguage] || option.textContent;
   });
+  updateSceneLabels();
   document.querySelectorAll('[data-placeholder-zh][data-placeholder-en]').forEach(input => {
     input.placeholder = input.dataset[`placeholder${interfaceLanguage === 'en' ? 'En' : 'Zh'}`];
   });
@@ -154,6 +187,21 @@ function degrees(radians) {
   return Number(radians || 0) * 180 / Math.PI;
 }
 
+function vector(values, digits = 3) {
+  if (!Array.isArray(values)) return '—';
+  return values.map(value => signed(value, digits)).join('  ');
+}
+
+function pose(value) {
+  if (!value) return '—';
+  return `p ${vector(value.pos)} · q ${vector(value.quat)}`;
+}
+
+function sensorAge(tNs) {
+  if (!latestRobotTNs || !tNs) return 'clock unavailable';
+  return `offset ${signed((Number(tNs) - latestRobotTNs) / 1e6, 1)} ms`;
+}
+
 function renderMonitorPolicy() {
   if (!monitorPolicyInfo) return;
   const info = monitorPolicyInfo;
@@ -246,6 +294,8 @@ function renderMonitor(state) {
   const loop = state.loop || {};
   $('#monitor-loop').textContent = Number(loop.hz || 0).toFixed(1);
   $('#monitor-missed').textContent = loop.missed || 0;
+  latestRobotTNs = Number(state.t_ns || 0);
+  $('#monitor-monotonic').textContent = latestRobotTNs ? `${(latestRobotTNs / 1e9).toFixed(3)} s` : 'legacy';
   renderLoopTrace(loop.hz);
 
   const safety = state.safety || {};
@@ -267,6 +317,12 @@ function renderMonitor(state) {
   $('#monitor-gravity-z').textContent = signed(gravity[2]);
   $('#monitor-upright').textContent = safety.fallen ? 'FALLEN' : 'upright';
   $('#monitor-upright').className = safety.fallen ? 'bad' : 'ok';
+
+  $('#monitor-imu-gyro').textContent = vector(state.imu?.gyro);
+  $('#monitor-imu-quat').textContent = vector(state.imu?.quat);
+  $('#monitor-frame-camera').textContent = pose(state.frames?.camera);
+  $('#monitor-frame-tof').textContent = pose(state.frames?.tof);
+  $('#monitor-frame-head-imu').textContent = pose(state.frames?.head_imu);
 
   const explanations = {
     deadman: 'deadman — no intent arrived recently, velocity zeroed',
@@ -299,6 +355,88 @@ function renderMonitor(state) {
     row.innerHTML = `<span>${name}</span><span class="joint-value">${signed(degrees(measured))}°</span><span class="joint-value">${signed(degrees(target))}°</span><span class="joint-value joint-error ${tone}">${signed(degrees(error))}°</span><span class="deviation"><i class="deviation-bar ${tone}" style="left:${left}%;width:${width}%"></i>${magnitude > 1 ? `<b class="deviation-edge" style="${error < 0 ? 'left:0' : 'right:0'}">${error < 0 ? '«' : '»'}</b>` : ''}</span>`;
     return row;
   }));
+}
+
+function renderTof(frame) {
+  const rows = Number(frame.rows || 0);
+  const cols = Number(frame.cols || 0);
+  const distances = frame.distance_mm || [];
+  const statuses = frame.status || [];
+  if (rows * cols !== distances.length || distances.length !== statuses.length) {
+    $('#tof-stream-status').textContent = 'invalid frame shape';
+    $('#tof-stream-status').className = 'bad';
+    return;
+  }
+  $('#tof-grid').style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  $('#tof-grid').style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+  $('#tof-grid').replaceChildren(...distances.map((distance, index) => {
+    const cell = document.createElement('span');
+    const status = Number(statuses[index]);
+    const mm = Number(distance);
+    cell.className = 'tof-cell';
+    cell.title = `zone ${index} · ${mm} mm · status ${status}`;
+    if ((status === 5 || status === 9) && mm > 0) {
+      const hue = 12 + Math.min(1, mm / 4000) * 185;
+      cell.style.background = `hsl(${hue} 72% 36%)`;
+      cell.textContent = Math.round(mm / 10);
+    } else if (status === 255) {
+      cell.classList.add('empty');
+      cell.textContent = '∞';
+    } else {
+      cell.classList.add('failed');
+      cell.textContent = `!${status}`;
+    }
+    return cell;
+  }));
+  $('#tof-stream-status').textContent = `live · seq ${frame.seq}`;
+  $('#tof-stream-status').className = 'ok';
+  $('#tof-frame-meta').textContent = `${rows}×${cols} · ${sensorAge(frame.t_ns)}`;
+}
+
+function renderHeadImu(frame) {
+  $('#head-imu-gyro').textContent = vector(frame.gyro);
+  $('#head-imu-accel').textContent = vector(frame.accel);
+  $('#head-imu-quat').textContent = vector(frame.quat);
+  $('#head-imu-temperature').textContent = `${Number(frame.temp_c).toFixed(1)} °C · ${sensorAge(frame.t_ns)}`;
+  $('#head-imu-stream-status').textContent = `live · seq ${frame.seq}`;
+  $('#head-imu-stream-status').className = 'ok';
+}
+
+function connectSensors() {
+  clearTimeout(sensorRetry);
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  sensorSocket = new WebSocket(`${protocol}://${location.host}/ws/sensors`);
+  sensorSocket.addEventListener('message', event => {
+    const message = JSON.parse(event.data);
+    if (message.type === 'tof-subscribed') {
+      const data = message.data;
+      $('#tof-stream-status').textContent = data.sensor
+        ? `${data.sensor} · ${data.hz} Hz`
+        : 'waiting';
+      $('#tof-stream-status').title = data.unavailable || '';
+      $('#tof-stream-status').className = data.sensor ? 'ok' : '';
+    } else if (message.type === 'head-imu-subscribed') {
+      const data = message.data;
+      $('#head-imu-stream-status').textContent = data.sensor
+        ? `${data.sensor} · ${data.hz} Hz`
+        : 'unavailable';
+      $('#head-imu-stream-status').title = data.unavailable || 'no sensor';
+      $('#head-imu-stream-status').className = data.sensor ? 'ok' : '';
+    } else if (message.type === 'tof') {
+      renderTof(message.data);
+    } else if (message.type === 'head-imu') {
+      renderHeadImu(message.data);
+    } else if (message.type === 'sensor-error') {
+      $('#tof-stream-status').textContent = message.message || 'disconnected';
+      $('#tof-stream-status').className = 'bad';
+    }
+  });
+  sensorSocket.addEventListener('close', () => {
+    $('#tof-stream-status').textContent = 'disconnected';
+    $('#tof-stream-status').className = 'bad';
+    sensorRetry = setTimeout(connectSensors, 2000);
+  });
+  sensorSocket.addEventListener('error', () => sensorSocket.close());
 }
 
 function connectMonitor() {
@@ -355,9 +493,9 @@ function decodeNextSimulatorFrame() {
     simulatorFrameTimes = simulatorFrameTimes.filter(value => now - value <= 3000);
     const elapsed = simulatorFrameTimes.at(-1) - simulatorFrameTimes[0];
     const fps = elapsed > 0 ? (simulatorFrameTimes.length - 1) * 1000 / elapsed : 0;
-    const backend = pending.meta?.backend || 'unknown';
     const rate = fps > 0 ? fps.toFixed(1) : '—';
-    simulatorStatus(`实时 · ${rate} FPS · ${backend}`, `Live · ${rate} FPS · ${backend}`, 'ok');
+    $('#sim-stream-status').title = `renderer: ${pending.meta?.backend || 'unknown'}`;
+    simulatorStatus(`实时 · ${rate} FPS`, `Live · ${rate} FPS`, 'ok');
     if (pending.meta) {
       $('#sim-clock').textContent = `t ${Number(pending.meta.sim_time).toFixed(1)} s`;
       $('#sim-resolution').textContent = `${pending.meta.width}×${pending.meta.height}`;
@@ -405,6 +543,186 @@ function connectSimulator() {
   simulatorSocket.addEventListener('error', () => simulatorSocket.close());
 }
 
+function headCameraStatus(text, state = '') {
+  const node = $('#head-camera-status');
+  node.textContent = text;
+  node.className = `head-camera-status ${state}`;
+}
+
+function renderHeadCameraFrame() {
+  headCameraRenderFrame = null;
+  if (!headCameraPendingFrame || currentSimulatorView !== 'head') return;
+  const bytes = new Uint8Array(headCameraPendingFrame);
+  headCameraPendingFrame = null;
+  const width = Number(headCameraMeta?.width || 640);
+  const height = Number(headCameraMeta?.height || 360);
+  if (bytes.length !== width * height * 2) {
+    headCameraStatus(`帧大小错误 / Invalid frame size: ${bytes.length}`, 'bad');
+    return;
+  }
+  const outputWidth = height;
+  const outputHeight = width;
+  const canvas = $('#head-camera-frame');
+  if (canvas.width !== outputWidth || canvas.height !== outputHeight) {
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+  }
+  const context = canvas.getContext('2d', {alpha: false});
+  const image = context.createImageData(outputWidth, outputHeight);
+  const target = image.data;
+  const clamp = value => Math.max(0, Math.min(255, value));
+  for (let y = 0; y < height; y += 1) {
+    const rotatedX = height - 1 - y;
+    for (let x = 0; x < width; x += 2) {
+      const source = (y * width + x) * 2;
+      const output0 = (x * outputWidth + rotatedX) * 4;
+      const output1 = ((x + 1) * outputWidth + rotatedX) * 4;
+      const u = bytes[source] - 128;
+      const y0 = bytes[source + 1] - 16;
+      const v = bytes[source + 2] - 128;
+      const y1 = bytes[source + 3] - 16;
+      const red = 409 * v + 128;
+      const green = -100 * u - 208 * v + 128;
+      const blue = 516 * u + 128;
+      target[output0] = clamp((298 * y0 + red) >> 8);
+      target[output0 + 1] = clamp((298 * y0 + green) >> 8);
+      target[output0 + 2] = clamp((298 * y0 + blue) >> 8);
+      target[output0 + 3] = 255;
+      target[output1] = clamp((298 * y1 + red) >> 8);
+      target[output1 + 1] = clamp((298 * y1 + green) >> 8);
+      target[output1 + 2] = clamp((298 * y1 + blue) >> 8);
+      target[output1 + 3] = 255;
+    }
+  }
+  context.putImageData(image, 0, 0);
+  $('#head-camera-placeholder').hidden = true;
+  const now = performance.now();
+  headCameraFrameTimes.push(now);
+  headCameraFrameTimes = headCameraFrameTimes.filter(value => now - value <= 3000);
+  const elapsed = headCameraFrameTimes.at(-1) - headCameraFrameTimes[0];
+  const fps = elapsed > 0 ? (headCameraFrameTimes.length - 1) * 1000 / elapsed : 0;
+  headCameraStatus(`实时 ${fps > 0 ? fps.toFixed(1) : '—'} FPS · UYVY · ↻90°`, 'ok');
+  if (headCameraPendingFrame) headCameraRenderFrame = requestAnimationFrame(renderHeadCameraFrame);
+}
+
+function connectHeadCamera() {
+  clearTimeout(headCameraRetry);
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  headCameraSocket = new WebSocket(`${protocol}://${location.host}/ws/head-camera`);
+  headCameraSocket.binaryType = 'arraybuffer';
+  headCameraStatus('连接中 / Connecting');
+  headCameraSocket.addEventListener('message', event => {
+    if (typeof event.data === 'string') {
+      const message = JSON.parse(event.data);
+      if (message.type === 'head-camera') {
+        headCameraMeta = message;
+        return;
+      }
+      headCameraStatus(message.message || '画面不可用 / Unavailable', 'bad');
+      return;
+    }
+    headCameraPendingFrame = event.data;
+    if (!headCameraRenderFrame && currentSimulatorView === 'head') {
+      headCameraRenderFrame = requestAnimationFrame(renderHeadCameraFrame);
+    }
+  });
+  headCameraSocket.addEventListener('close', () => {
+    headCameraMeta = null;
+    headCameraFrameTimes = [];
+    headCameraStatus('已断开 / Disconnected', 'bad');
+    headCameraRetry = setTimeout(connectHeadCamera, 2000);
+  });
+  headCameraSocket.addEventListener('error', () => headCameraSocket.close());
+}
+
+function setSimulatorView(view) {
+  currentSimulatorView = view === 'head' ? 'head' : 'world';
+  const head = currentSimulatorView === 'head';
+  $('#sim-frame').hidden = head;
+  $('#sim-placeholder').hidden = head || $('#sim-frame').classList.contains('ready');
+  $('#head-camera-frame').hidden = !head;
+  $('#head-camera-placeholder').hidden = !head || Boolean(headCameraFrameTimes.length);
+  $('#head-camera-status').hidden = !head;
+  $('.sim-quality-control').hidden = head;
+  $('.sim-overlay').hidden = head;
+  simulatorViewport.classList.toggle('head-view', head);
+  document.querySelectorAll('[data-sim-view]').forEach(button => {
+    button.classList.toggle('active', button.dataset.simView === currentSimulatorView);
+  });
+  if (head && headCameraPendingFrame && !headCameraRenderFrame) {
+    headCameraRenderFrame = requestAnimationFrame(renderHeadCameraFrame);
+  }
+}
+
+async function refreshScenes() {
+  try {
+    const catalog = await api('/api/scenes');
+    const select = $('#sim-scene');
+    const previous = select.value;
+    select.replaceChildren(...catalog.available.map(scene =>
+      Object.assign(document.createElement('option'), {value: scene, textContent: sceneLabel(scene)})
+    ));
+    select.value = catalog.available.includes(catalog.selected) ? catalog.selected : previous;
+    if (!select.value && catalog.available.length) select.value = catalog.available[0];
+    $('#sim-scene-apply').disabled = !select.value || select.value === catalog.selected;
+  } catch {
+    $('#sim-scene-apply').disabled = true;
+  }
+}
+
+async function copySceneFilename() {
+  const filename = $('#sim-scene').value;
+  const status = $('#scene-copy-status');
+  if (!filename) return;
+  const input = document.createElement('textarea');
+  input.value = filename;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  document.body.append(input);
+  input.select();
+  let copied = document.execCommand('copy');
+  input.remove();
+  $('#sim-scene').focus();
+  try {
+    if (!copied) {
+      await navigator.clipboard.writeText(filename);
+      copied = true;
+    }
+  } catch {}
+  if (copied) {
+    status.textContent = interfaceLanguage === 'en' ? 'Copied' : '已复制';
+    status.title = filename;
+  } else {
+    status.textContent = interfaceLanguage === 'en' ? 'Copy failed' : '复制失败';
+    status.title = '';
+  }
+  clearTimeout(copySceneFilename.timer);
+  copySceneFilename.timer = setTimeout(() => { status.textContent = ''; }, 1800);
+}
+
+async function applySimulatorScene() {
+  const button = $('#sim-scene-apply');
+  const scene = $('#sim-scene').value;
+  if (!scene || serviceOperations.has('mujoco')) return;
+  serviceOperations.add('mujoco');
+  button.disabled = true;
+  button.textContent = interfaceLanguage === 'en' ? 'Restarting…' : '重启中…';
+  try {
+    await api('/api/services/mujoco/restart', {
+      method: 'POST',
+      body: JSON.stringify({scene}),
+    });
+    await new Promise(resolve => setTimeout(resolve, 800));
+  } catch (error) {
+    alert(`MuJoCo: ${error.message}`);
+  } finally {
+    serviceOperations.delete('mujoco');
+    setBilingual(button, '应用', 'Apply');
+    await Promise.all([refresh(), refreshScenes()]);
+  }
+}
+
 function sendSimulatorCamera(action, dx = 0, dy = 0) {
   if (simulatorSocket?.readyState !== WebSocket.OPEN) return;
   simulatorSocket.send(JSON.stringify({type: 'camera', action, dx, dy}));
@@ -447,6 +765,7 @@ simulatorQuality.addEventListener('change', () => {
 });
 new ResizeObserver(scheduleSimulatorRenderProfile).observe(simulatorViewport);
 simulatorViewport.addEventListener('pointerdown', event => {
+  if (currentSimulatorView !== 'world') return;
   if (event.target.closest('.sim-quality-control')) return;
   if (event.button !== 0) return;
   event.preventDefault();
@@ -473,11 +792,13 @@ simulatorViewport.addEventListener('pointerup', endSimulatorDrag);
 simulatorViewport.addEventListener('pointercancel', endSimulatorDrag);
 simulatorViewport.addEventListener('lostpointercapture', endSimulatorDrag);
 simulatorViewport.addEventListener('wheel', event => {
+  if (currentSimulatorView !== 'world') return;
   if (event.target.closest('.sim-quality-control')) return;
   event.preventDefault();
   sendSimulatorCamera('zoom', 0, Math.max(-200, Math.min(200, event.deltaY)));
 }, {passive: false});
 simulatorViewport.addEventListener('dblclick', event => {
+  if (currentSimulatorView !== 'world') return;
   event.preventDefault();
   sendSimulatorCamera('reset');
 });
@@ -591,7 +912,9 @@ async function refresh() {
     setBilingual($('#robotd'), robotd.connected ? '已连接' : '未连接', robotd.connected ? 'Connected' : 'Disconnected');
     $('#robotd').className = robotd.connected ? 'ok' : 'bad';
     if (robotd.connected) {
-      setBilingual($('#robotd-detail'), 'JSON-RPC 可达', 'JSON-RPC reachable');
+      const source = robotd.source || {};
+      const revision = source.revision && source.revision !== 'unknown' ? source.revision.slice(0, 12) : 'unknown';
+      $('#robotd-detail').textContent = `${source.ref || 'unknown'} @ ${revision}`;
       renderMonitorHealth(robotd.health);
     } else {
       $('#robotd-detail').textContent = robotd.error || data.robotd_socket.path;
@@ -649,6 +972,15 @@ $('#smoke-form').addEventListener('submit', async event => {
 document.querySelectorAll('.service-action').forEach(button =>
   button.addEventListener('click', () => manageService(button))
 );
+document.querySelectorAll('[data-sim-view]').forEach(button =>
+  button.addEventListener('click', () => setSimulatorView(button.dataset.simView))
+);
+$('#sim-scene').addEventListener('change', () => {
+  $('#sim-scene-apply').disabled = false;
+  $('#scene-copy-status').textContent = '';
+});
+$('#scene-copy').addEventListener('click', () => void copySceneFilename());
+$('#sim-scene-apply').addEventListener('click', applySimulatorScene);
 
 markStaticChinese();
 setInterfaceLanguage(interfaceLanguage);
@@ -658,7 +990,10 @@ $('#language-toggle').addEventListener('click', () =>
 
 refresh();
 refreshJobs();
+refreshScenes();
 connectMonitor();
+connectSensors();
 connectSimulator();
+connectHeadCamera();
 setInterval(refresh, 2000);
 setInterval(refreshJobs, 3000);

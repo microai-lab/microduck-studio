@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
     <meta name="theme-color" content="#0b0f16">
     <title>Microduck Studio</title>
-    <link rel="stylesheet" href="/static/styles.css?v=workbench-24">
+    <link rel="stylesheet" href="/static/styles.css?v=workbench-41">
   </head>
   <body>
     <main class="workbench">
@@ -61,13 +61,20 @@
         <div class="simulator-panel">
           <div class="stage-title">
             <div class="sim-heading"><p class="eyebrow">LIVE PHYSICS</p><div class="sim-heading-row"><h2>MuJoCo 场景<small class="label-en">MuJoCo scene</small></h2><div class="sim-camera-hint"><span>拖动旋转 · 滚轮缩放 · 双击复位</span><small class="label-en">Drag · Zoom · Reset</small></div></div></div>
-            <span id="sim-stream-status" class="pill bilingual"><span id="sim-stream-status-zh">连接中</span><small id="sim-stream-status-en" class="label-en">Connecting</small></span>
+            <div class="sim-toolbar">
+              <span id="sim-stream-status" class="pill bilingual"><span id="sim-stream-status-zh">连接中</span><small id="sim-stream-status-en" class="label-en">Connecting</small></span>
+              <div class="sim-view-switch" role="group" aria-label="Camera view"><button type="button" data-sim-view="world" class="active">世界<small class="label-en">World</small></button><button type="button" data-sim-view="head">第一视角<small class="label-en">Head camera</small></button></div>
+              <div class="scene-control"><button id="scene-copy" class="scene-copy-trigger" type="button" title="复制当前场景文件名 / Copy current scene filename"><span>场景</span><small class="label-en">Scene</small></button><select id="sim-scene" aria-label="MuJoCo scene"></select><button id="sim-scene-apply" type="button" disabled>应用<small class="label-en">Apply</small></button><span id="scene-copy-status" class="scene-copy-status" aria-live="polite"></span></div>
+            </div>
           </div>
           <div class="simulator-viewport">
             <img id="sim-frame" alt="MuJoCo 实时仿真画面">
+            <canvas id="head-camera-frame" width="640" height="360" aria-label="Robot head camera" hidden></canvas>
             <div id="sim-placeholder" class="sim-placeholder"><span class="duck-mark">◒</span><strong>等待 MuJoCo 画面</strong><small>Waiting for MuJoCo frames</small></div>
+            <div id="head-camera-placeholder" class="sim-placeholder" hidden><span class="duck-mark">◉</span><strong>等待机器人视角</strong><small>Waiting for the head camera</small></div>
             <label class="sim-quality-control"><span>画质</span><select id="sim-quality" aria-label="MuJoCo 画质"><option value="smooth" data-zh="流畅" data-en="Smooth">流畅</option><option value="clear" data-zh="清晰" data-en="Clear" selected>清晰</option><option value="lossless" data-zh="无损" data-en="Lossless">无损</option></select></label>
             <div class="sim-overlay"><span id="sim-clock">t 0.0 s</span><span id="sim-height">z 0.000 m</span><span id="sim-resolution">—×—</span></div>
+            <span id="head-camera-status" class="head-camera-status" hidden>连接中 / Connecting</span>
           </div>
         </div>
 
@@ -84,6 +91,7 @@
                   <span>· t <strong id="monitor-time">—</strong> s</span>
                   <span>· <strong id="monitor-loop">—</strong> Hz</span>
                   <span>· missed <strong id="monitor-missed">—</strong></span>
+                  <span>· mono <strong id="monitor-monotonic">—</strong></span>
                 </div>
                 <div class="robot-status-grid">
                   <div class="terminal-readout">
@@ -108,6 +116,27 @@
                 </div>
               </section>
 
+              <section class="sensor-observability">
+                <div class="terminal-block sensor-readout">
+                  <div class="terminal-legend"><span>trunk imu</span><small>robot.state</small></div>
+                  <div><span>gyro rad/s</span><strong id="monitor-imu-gyro">—</strong></div>
+                  <div><span>quat wxyz</span><strong id="monitor-imu-quat">—</strong></div>
+                </div>
+                <div class="terminal-block sensor-readout frames-readout">
+                  <div class="terminal-legend"><span>sensor → trunk poses</span><small>m · wxyz</small></div>
+                  <div><span>camera</span><strong id="monitor-frame-camera">—</strong></div>
+                  <div><span>tof</span><strong id="monitor-frame-tof">—</strong></div>
+                  <div><span>head imu</span><strong id="monitor-frame-head-imu">—</strong></div>
+                </div>
+                <div class="terminal-block sensor-readout">
+                  <div class="terminal-legend"><span>head imu</span><small id="head-imu-stream-status">connecting</small></div>
+                  <div><span>gyro rad/s</span><strong id="head-imu-gyro">—</strong></div>
+                  <div><span>accel m/s²</span><strong id="head-imu-accel">—</strong></div>
+                  <div><span>quat wxyz</span><strong id="head-imu-quat">—</strong></div>
+                  <div><span>temperature</span><strong id="head-imu-temperature">—</strong></div>
+                </div>
+              </section>
+
               <section class="terminal-block joints-block">
                 <div class="terminal-legend"><span>joints</span><small>degrees · bar reaches ±11.5°</small></div>
                 <div class="joint-grid joint-grid-head"><span>joint</span><span>measured</span><span>commanded</span><span>error</span><span>deviation</span></div>
@@ -128,6 +157,11 @@
                   <span id="monitor-robot-placeholder">等待权威画面<br><small>Waiting for authoritative view</small></span>
                 </div>
               </section>
+              <section class="terminal-block tof-block">
+                <div class="terminal-legend"><span>tof · 8×8 depth cm</span><small id="tof-stream-status">connecting</small></div>
+                <div id="tof-grid" class="tof-grid" aria-label="ToF depth grid"></div>
+                <div class="tof-footer"><span><i class="tof-near"></i>near</span><span><i class="tof-far"></i>far</span><span><i class="tof-empty"></i>no target</span><span><i class="tof-failed"></i>failed</span><strong id="tof-frame-meta">—</strong></div>
+              </section>
               <section class="terminal-block path-block">
                 <div class="terminal-legend"><span>path</span></div>
                 <svg id="monitor-path" viewBox="0 0 320 190" role="img" aria-label="Robot odometry path">
@@ -144,6 +178,6 @@
         </section>
       </section>
     </main>
-    <script src="/static/app.js?v=workbench-25"></script>
+    <script src="/static/app.js?v=workbench-41"></script>
   </body>
 </html>

@@ -18,7 +18,7 @@ class ServiceManagerUnavailable(RuntimeError):
 class ServiceController:
     """File-based bridge to the host launcher with a deliberately tiny command surface."""
 
-    def __init__(self, directory: Path, timeout: float = 8.0):
+    def __init__(self, directory: Path, timeout: float = 30.0):
         self.directory = directory
         self.timeout = timeout
 
@@ -30,19 +30,23 @@ class ServiceController:
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
             return False
 
-    async def request(self, service: ServiceName, action: ServiceAction) -> dict:
+    async def request(
+        self, service: ServiceName, action: ServiceAction, *, scene: str | None = None
+    ) -> dict:
         if service not in {"robotd", "mujoco"} or action not in {"start", "restart"}:
             raise ValueError("unsupported service operation")
+        if scene is not None and service != "mujoco":
+            raise ValueError("a scene can only be selected for MuJoCo")
         if not self.available():
             raise ServiceManagerUnavailable("host service manager is not available")
 
         request_id = uuid.uuid4().hex
         request_path = self.directory / f"{request_id}.request.json"
         response_path = self.directory / f"{request_id}.response.json"
-        request_path.write_text(
-            json.dumps({"id": request_id, "service": service, "action": action}),
-            encoding="utf-8",
-        )
+        request = {"id": request_id, "service": service, "action": action}
+        if scene is not None:
+            request["scene"] = scene
+        request_path.write_text(json.dumps(request), encoding="utf-8")
         deadline = asyncio.get_running_loop().time() + self.timeout
         try:
             while asyncio.get_running_loop().time() < deadline:

@@ -9,7 +9,8 @@ RUN apt-get update \
 
 WORKDIR /workspace
 COPY --from=microduck_source . .
-RUN cargo build --locked -p robotd -p robotctl
+RUN cargo build --locked -p robotd -p robotctl \
+    && cargo build --locked -p tof --bin tofd
 
 FROM python:3.13-slim
 
@@ -21,8 +22,9 @@ RUN apt-get update \
 
 COPY --from=build /workspace/target/debug/robotd /usr/local/bin/robotd
 COPY --from=build /workspace/target/debug/robotctl /usr/local/bin/robotctl
-COPY --from=microduck_source /policies /opt/microduck/policies
+COPY --from=build /workspace/target/debug/tofd /usr/local/bin/tofd
 COPY docker/microduck/entrypoint.sh /usr/local/bin/microduck-entrypoint
+COPY docker/microduck/verify_contract.py /usr/local/lib/microduck-studio/verify-contract.py
 RUN chmod +x /usr/local/bin/microduck-entrypoint
 
 ENV ORT_DYLIB_PATH=/opt/ort/onnxruntime/capi/libonnxruntime.so.${ORT_VERSION}

@@ -10,10 +10,34 @@ import pytest
 from microduck_studio.protocol import (
     BodyCameraClient,
     BodyFrameClient,
+    HeadCameraClient,
     ProtocolError,
     RobotdClient,
     RobotdMonitor,
+    SensorMonitor,
 )
+
+
+@pytest.mark.asyncio
+async def test_head_camera_reads_length_prefixed_uyvy_frames():
+    frame = bytes(HeadCameraClient.FRAME_BYTES)
+
+    async def serve(reader, writer):
+        del reader
+        writer.write(len(frame).to_bytes(4, "little") + frame)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    stream = HeadCameraClient("127.0.0.1", port).frames()
+    try:
+        assert await anext(stream) == frame
+    finally:
+        await stream.aclose()
+        server.close()
+        await server.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -106,6 +130,50 @@ async def test_monitor_subscribes_at_requested_rate_and_streams_state():
         assert await anext(stream) == {"type": "state", "data": {"policy": "walk"}}
         assert messages[0]["method"] == "robot.subscribe"
         assert messages[0]["params"] == {"hz": 10}
+    finally:
+        await stream.aclose()
+        server.close()
+        await server.wait_closed()
+        await asyncio.to_thread(socket_path.unlink, missing_ok=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "notification", "subscribed_type", "frame_type"),
+    [
+        ("tof.stream", "tof.frame", "tof-subscribed", "tof"),
+        ("head_imu.stream", "head_imu.frame", "head-imu-subscribed", "head-imu"),
+    ],
+)
+async def test_sensor_monitor_subscribes_and_streams_frames(
+    method, notification, subscribed_type, frame_type
+):
+    socket_path = Path(f"/tmp/microduck-studio-{os.getpid()}-{uuid.uuid4().hex[:6]}.sock")
+    requests = []
+
+    async def serve(reader, writer):
+        request = json.loads(await reader.readline())
+        requests.append(request)
+        writer.write(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"accepted": True, "hz": 15}}).encode()
+            + b"\n"
+        )
+        writer.write(
+            json.dumps({"jsonrpc": "2.0", "method": notification, "params": {"seq": 7}}).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        await reader.read()
+
+    server = await asyncio.start_unix_server(serve, socket_path)
+    stream = SensorMonitor(socket_path, method).messages()
+    try:
+        assert await anext(stream) == {
+            "type": subscribed_type,
+            "data": {"accepted": True, "hz": 15},
+        }
+        assert await anext(stream) == {"type": frame_type, "data": {"seq": 7}}
+        assert requests == [{"jsonrpc": "2.0", "id": 1, "method": method}]
     finally:
         await stream.aclose()
         server.close()

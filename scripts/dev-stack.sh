@@ -12,7 +12,9 @@ GPU_DRI_FILE="$STUDIO_REPO/compose.gpu-dri.yaml"
 GPU_NVIDIA_FILE="$STUDIO_REPO/compose.gpu-nvidia.yaml"
 
 BODY_PORT=${MICRODUCK_BODY_PORT:-7801}
+HEAD_CAMERA_PORT=${MICRODUCK_HEAD_CAMERA_PORT:-7901}
 STUDIO_PORT=${MICRODUCK_STUDIO_PORT:-8090}
+SCENE=${MICRODUCK_SCENE:-scene.xml}
 # Rendering/isolation choices must remain visible in shell history. The no-argument default is the
 # authoritative native MuJoCo path; Docker and GPU passthrough are selected only with CLI flags.
 SIM_MODE=native
@@ -26,11 +28,12 @@ RENDER_QUALITY=${MICRODUCK_RENDER_QUALITY:-95}
 HEADLESS=true
 STOP_ON_BROWSER_CLOSE=false
 CONTROL_PROBE=true
-SIM_REF=${MICRODUCK_SIM_REF:-sim-remote-io}
+SIM_REF=${MICRODUCK_SIM_REF:-main}
 SIM_REPO_URL=${MICRODUCK_SIM_REPO_URL:-https://github.com/pollen-robotics/microduck.git}
 RUST_IMAGE=${MICRODUCK_RUST_IMAGE:-rust:1.89-bookworm}
 ORT_VERSION=${MICRODUCK_ORT_VERSION:-1.28.0}
 ROBOTD_CONTAINER=microduck-studio-robotd
+TOFD_CONTAINER=microduck-studio-tofd
 RPC_CONTAINER=microduck-studio-rpc-bridge
 WEB_CONTAINER=microduck-studio-web
 RUNTIME_VOLUME=microduck-studio-runtime
@@ -42,6 +45,7 @@ BODY_PLIST="$RUNTIME_DIR/mujoco.plist"
 SERVICE_MANAGER_PID_FILE="$RUNTIME_DIR/service-manager.pid"
 SERVICE_MANAGER_PLIST="$RUNTIME_DIR/service-manager.plist"
 SERVICE_MANAGER_DIR="$RUNTIME_DIR/services"
+SIMULATOR_CONFIG="$RUNTIME_DIR/simulator.json"
 
 BODY_LABEL=com.microduck.mujoco.viewer
 SOCKET_LABEL=com.microduck.studio.socketbridge
@@ -136,6 +140,7 @@ stop_stack() {
     compose --profile headless down --remove-orphans >/dev/null 2>&1 || true
     remove_container "$RPC_CONTAINER"
     remove_container "$ROBOTD_CONTAINER"
+    remove_container "$TOFD_CONTAINER"
     remove_container "$WEB_CONTAINER"
     rm -f "$HOST_SOCKET" "$HOST_BRIDGE_SCRIPT" "$HOST_STUDIO_SCRIPT"
 }
@@ -150,7 +155,7 @@ start_service_manager() {
         python3 -c '
 import plistlib, sys
 
-path, label, python, script, directory, mode, domain, body_label, body_port, docker, launchctl, log = sys.argv[1:]
+path, label, python, script, directory, mode, domain, body_label, body_port, head_camera_port, docker, launchctl, log, simulator_config, scene_directory = sys.argv[1:]
 config = {
     "Label": label,
     "ProgramArguments": [
@@ -160,8 +165,11 @@ config = {
         "--domain", domain,
         "--body-label", body_label,
         "--body-port", body_port,
+        "--head-camera-port", head_camera_port,
         "--docker", docker,
         "--launchctl", launchctl,
+        "--simulator-config", simulator_config,
+        "--scene-directory", scene_directory,
     ],
     "RunAtLoad": True,
     "KeepAlive": True,
@@ -172,14 +180,18 @@ with open(path, "wb") as output:
     plistlib.dump(config, output)
 ' "$SERVICE_MANAGER_PLIST" "$SERVICE_MANAGER_LABEL" "$python_bin" \
             "$STUDIO_REPO/scripts/service-manager.py" "$SERVICE_MANAGER_DIR" "$SIM_MODE" \
-            "$DOMAIN" "$BODY_LABEL" "$BODY_PORT" "$docker_bin" "$launchctl_bin" \
-            "$RUNTIME_DIR/service-manager.log"
+            "$DOMAIN" "$BODY_LABEL" "$BODY_PORT" "$HEAD_CAMERA_PORT" "$docker_bin" "$launchctl_bin" \
+            "$RUNTIME_DIR/service-manager.log" "$SIMULATOR_CONFIG" \
+            "$MICRODUCK_RL_REPO/src/mjlab_microduck/robot/microduck"
         launchctl bootstrap "$DOMAIN" "$SERVICE_MANAGER_PLIST"
     else
         "$python_bin" "$STUDIO_REPO/scripts/service-manager.py" \
             --directory "$SERVICE_MANAGER_DIR" --mode "$SIM_MODE" --domain "$DOMAIN" \
-            --body-label "$BODY_LABEL" --body-port "$BODY_PORT" --docker "$docker_bin" \
+            --body-label "$BODY_LABEL" --body-port "$BODY_PORT" \
+            --head-camera-port "$HEAD_CAMERA_PORT" --docker "$docker_bin" \
             --launchctl "$launchctl_bin" \
+            --simulator-config "$SIMULATOR_CONFIG" \
+            --scene-directory "$MICRODUCK_RL_REPO/src/mjlab_microduck/robot/microduck" \
             >>"$RUNTIME_DIR/service-manager.log" 2>&1 &
         printf '%s\n' "$!" >"$SERVICE_MANAGER_PID_FILE"
     fi
@@ -236,6 +248,9 @@ ensure_sim_source() {
     fi
 
     short=$(printf '%s' "$commit" | cut -c1-12)
+    MICRODUCK_RUNTIME_REF=$SIM_REF
+    MICRODUCK_RUNTIME_REVISION=$commit
+    export MICRODUCK_RUNTIME_REF MICRODUCK_RUNTIME_REVISION
     SIM_SOURCE="$RUNTIME_DIR/sim-source-$short"
     export SIM_SOURCE
     if [ ! -d "$SIM_SOURCE" ]; then
@@ -249,11 +264,13 @@ ensure_sim_source() {
     MICRODUCK_SIM_SOURCE=$SIM_SOURCE
     MICRODUCK_RUNTIME_DIR=$RUNTIME_DIR
     MICRODUCK_BODY_PORT=$BODY_PORT
+    MICRODUCK_HEAD_CAMERA_PORT=$HEAD_CAMERA_PORT
     MICRODUCK_STUDIO_PORT=$STUDIO_PORT
     MICRODUCK_RUST_IMAGE=$RUST_IMAGE
     MICRODUCK_ORT_VERSION=$ORT_VERSION
     export MICRODUCK_SIM_SOURCE MICRODUCK_RUNTIME_DIR
-    export MICRODUCK_REPO MICRODUCK_RL_REPO MICRODUCK_BODY_PORT MICRODUCK_STUDIO_PORT
+    export MICRODUCK_REPO MICRODUCK_RL_REPO MICRODUCK_BODY_PORT MICRODUCK_HEAD_CAMERA_PORT
+    export MICRODUCK_STUDIO_PORT
     export MICRODUCK_RUST_IMAGE MICRODUCK_ORT_VERSION
     MICRODUCK_RENDER_WIDTH=$RENDER_WIDTH
     MICRODUCK_RENDER_HEIGHT=$RENDER_HEIGHT
@@ -263,19 +280,56 @@ ensure_sim_source() {
     export MICRODUCK_RENDER_QUALITY MICRODUCK_BODY_HOST MICRODUCK_MUJOCO_GL
 }
 
+write_simulator_config() {
+    scene_dir="$MICRODUCK_RL_REPO/src/mjlab_microduck/robot/microduck"
+    case "$SCENE" in scene*.xml) ;; *) die "--scene must name an RL scene*.xml file" ;; esac
+    [ -f "$scene_dir/$SCENE" ] || die "RL scene does not exist: $SCENE"
+    python3 -c '
+import json, os, sys
+path, scene = sys.argv[1:]
+temporary = path + ".tmp"
+with open(temporary, "w", encoding="utf-8") as output:
+    json.dump({"scene": scene}, output)
+os.replace(temporary, path)
+' "$SIMULATOR_CONFIG" "$SCENE"
+}
+
+ensure_policies() {
+    policy_root="$RUNTIME_DIR/policies"
+    if [ ! -f "$policy_root/current/alpha_stand.onnx" ]; then
+        [ -f "$SIM_SOURCE/scripts/seed-policies.sh" ] ||
+            die "$SIM_REF has no scripts/seed-policies.sh; use a current microduck main or release tag"
+        say "no policy set here — fetching the official one"
+        sh "$SIM_SOURCE/scripts/seed-policies.sh" "$policy_root" || true
+    fi
+    if [ ! -f "$policy_root/current/alpha_stand.onnx" ]; then
+        for legacy in "$MICRODUCK_REPO/policies" "$RUNTIME_DIR"/sim-source-*/policies; do
+            [ -f "$legacy/alpha_stand.onnx" ] || continue
+            say "official policy fetch unavailable — importing cached set from $legacy"
+            imported="$policy_root/releases/imported-studio"
+            mkdir -p "$imported"
+            cp "$legacy"/*.onnx "$imported/"
+            ln -sfn releases/imported-studio "$policy_root/current"
+            break
+        done
+    fi
+    [ -f "$policy_root/current/alpha_stand.onnx" ] ||
+        die "no policy set in $policy_root; network access is needed once"
+}
+
 write_robotd_params() {
     PARAMS_FILE="$RUNTIME_DIR/robotd.toml"
     export PARAMS_FILE
     cat >"$PARAMS_FILE" <<'EOF'
 [policy]
 enabled = true
-walk = "/opt/microduck/policies/alpha_walking.onnx"
-stand = "/opt/microduck/policies/alpha_stand.onnx"
-sitstand = "/opt/microduck/policies/alpha_sitstand.onnx"
-ground_pick = "/opt/microduck/policies/alpha_ground_pick.onnx"
-kick_left = "/opt/microduck/policies/ball_kick_left.onnx"
-kick_right = "/opt/microduck/policies/ball_kick_right.onnx"
-roulade = "/opt/microduck/policies/roulade.onnx"
+walk = "/opt/robot/policies/current/alpha_walking.onnx"
+stand = "/opt/robot/policies/current/alpha_stand.onnx"
+sitstand = "/opt/robot/policies/current/alpha_sitstand.onnx"
+ground_pick = "/opt/robot/policies/current/alpha_ground_pick.onnx"
+kick_left = "/opt/robot/policies/current/ball_kick_left.onnx"
+kick_right = "/opt/robot/policies/current/ball_kick_right.onnx"
+roulade = "/opt/robot/policies/current/roulade.onnx"
 
 [audio]
 device = "default"
@@ -291,12 +345,16 @@ start_native_body() {
     python3 -c '
 import plistlib, sys
 
-path, label, python, mjpython, port, width, height, fps, quality, headless, idle, log = sys.argv[1:]
+path, label, python, runner, config, rl_root, mjpython, port, frame_port, width, height, fps, quality, headless, idle, log = sys.argv[1:]
 arguments = [
     python,
+    runner,
+    "--config",
+    config,
+    "--rl-root",
+    rl_root,
+    "--mjpython",
     mjpython,
-    "-m",
-    "mjlab_microduck.sim.body_server",
     "--keyframe",
     "HOME",
     "--port",
@@ -310,6 +368,10 @@ arguments = [
     fps,
     "--render-quality",
     quality,
+    "--cameras",
+    "a",
+    "--frame-port",
+    frame_port,
 ]
 if headless == "true":
     arguments.append("--headless")
@@ -328,8 +390,10 @@ with open(path, "wb") as output:
     plistlib.dump(config, output)
 ' "$BODY_PLIST" "$BODY_LABEL" \
         "$MICRODUCK_RL_REPO/.venv/bin/python" \
+        "$STUDIO_REPO/scripts/run-body.py" "$SIMULATOR_CONFIG" "$MICRODUCK_RL_REPO" \
         "$MICRODUCK_RL_REPO/.venv/bin/mjpython" \
-        "$BODY_PORT" "$RENDER_WIDTH" "$RENDER_HEIGHT" "$RENDER_FPS" "$RENDER_QUALITY" \
+        "$BODY_PORT" "$HEAD_CAMERA_PORT" "$RENDER_WIDTH" "$RENDER_HEIGHT" \
+        "$RENDER_FPS" "$RENDER_QUALITY" \
         "$HEADLESS" "$([ "$STOP_ON_BROWSER_CLOSE" = true ] && printf 10 || printf 0)" \
         "$RUNTIME_DIR/mujoco.log"
     launchctl bootstrap "$DOMAIN" "$BODY_PLIST"
@@ -343,8 +407,8 @@ start_docker_body() {
 }
 
 start_compose() {
-    say "building and starting robotd and Microduck Studio with Docker Compose"
-    compose up -d --build --wait --wait-timeout 60 robotd studio
+    say "building and starting robotd, tofd, and Microduck Studio with Docker Compose"
+    compose up -d --build --wait --wait-timeout 60 robotd tofd studio
     wait_tcp 127.0.0.1 "$STUDIO_PORT" "Microduck Studio"
 }
 
@@ -358,6 +422,7 @@ import json, sys
 status = json.load(sys.stdin)
 assert status["robotd"]["connected"], status["robotd"]
 assert status["robotd"]["health"]["healthy"], status["robotd"]["health"]
+assert status["tofd_socket"]["exists"], status["tofd_socket"]
 assert status["simulator"]["connected"], status["simulator"]
 ' 2>/dev/null; then
             return 0
@@ -381,35 +446,18 @@ if simulator.get("error"):
     print("MuJoCo error:", simulator["error"], file=sys.stderr)
 ' || true
     fi
-    die "Studio, robotd, and MuJoCo did not become healthy together"
+    die "Studio, robotd, tofd, and MuJoCo did not become healthy together"
 }
 
 verify_control() {
-    base_url="http://127.0.0.1:$STUDIO_PORT"
-    say "verifying Web -> robotd -> policy -> MuJoCo control"
-    curl -fsS -X POST -H 'content-type: application/json' \
-        -d '{"on":true}' "$base_url/api/control/enable" >/dev/null
-    before=$(curl -fsS "$base_url/api/status" | python3 -c \
-        'import json,sys; p=json.load(sys.stdin)["simulator"]["trunk"]; print(f"{p[0]},{p[1]}")')
-    count=0
-    while [ "$count" -lt 30 ]; do
-        curl -fsS -X POST -H 'content-type: application/json' \
-            -d '{"vx":0.2,"vy":0,"vyaw":0}' "$base_url/api/control/move" >/dev/null
-        count=$((count + 1))
-        sleep 0.1
-    done
-    curl -fsS -X POST "$base_url/api/control/stop" >/dev/null
-    after=$(curl -fsS "$base_url/api/status" | python3 -c \
-        'import json,sys; p=json.load(sys.stdin)["simulator"]["trunk"]; print(f"{p[0]},{p[1]}")')
-    python3 -c '
-import math, sys
-before_x, before_y = map(float, sys.argv[1].split(","))
-after_x, after_y = map(float, sys.argv[2].split(","))
-distance = math.hypot(after_x - before_x, after_y - before_y)
-if distance < 0.02:
-    raise SystemExit(f"control probe moved only {distance:.3f} m")
-print(f"control probe passed: MuJoCo moved {distance:.3f} m")
-' "$before" "$after"
+    say "verifying Studio -> robotd -> policy -> MuJoCo contracts"
+    docker exec "$ROBOTD_CONTAINER" python3 \
+        /usr/local/lib/microduck-studio/verify-contract.py \
+        --expected-ref "$MICRODUCK_RUNTIME_REF" \
+        --expected-revision "$MICRODUCK_RUNTIME_REVISION" \
+        --expected-scene "$SCENE" \
+        --head-camera-host "$MICRODUCK_BODY_HOST" \
+        --head-camera-port "$HEAD_CAMERA_PORT"
 }
 
 show_status() {
@@ -418,6 +466,7 @@ import json, sys
 status = json.load(sys.stdin)
 print("Studio:   online")
 print("robotd:   " + ("healthy" if status["robotd"].get("health", {}).get("healthy") else "offline"))
+print("tofd:     " + ("online" if status["tofd_socket"]["exists"] else "offline"))
 print("MuJoCo:   " + ("online" if status["simulator"]["connected"] else "offline"))
 '
 }
@@ -462,7 +511,12 @@ while [ "$#" -gt 0 ]; do
             CONTROL_PROBE=false
             shift
             ;;
-        *) die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]" ;;
+        --scene)
+            [ "$#" -ge 2 ] || die "--scene requires a scene*.xml file name"
+            SCENE=$2
+            shift 2
+            ;;
+        *) die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--scene scene*.xml] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]" ;;
     esac
 done
 
@@ -486,7 +540,7 @@ case "$action" in
     start)
         ;;
     *)
-        die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]"
+        die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--scene scene*.xml] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]"
         ;;
 esac
 
@@ -517,6 +571,8 @@ if [ "$action" = monitor ]; then
     monitor_robot
     exit 0
 fi
+ensure_policies
+write_simulator_config
 write_robotd_params
 
 stop_stack

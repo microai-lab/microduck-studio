@@ -4,5 +4,8 @@ set -eu
 if [ "${1:-}" = robotd ]; then
     rm -f /runtime/robotd.sock
 fi
+if [ "${1:-}" = tofd ]; then
+    rm -f /runtime/tofd.sock
+fi
 
 exec "$@"

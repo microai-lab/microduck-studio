@@ -53,8 +53,8 @@ Open the `microduck-dev` workspace in a local session and use this prompt:
 ```text
 Start all Microduck Studio services. First read AGENTS.md and microduck-studio/README.md. Check the
 three sibling repositories, Docker, uv, and ports 7801 and 8090. Then run
-./scripts/dev-stack.sh from microduck-studio. Wait for "control probe passed" before reporting the
-Studio URL and the status of Studio, robotd, and MuJoCo. Do not start a training job, and do not
+./scripts/dev-stack.sh from microduck-studio. Wait for "contract probe passed" before reporting the
+Studio URL and the status of Studio, robotd, tofd, and MuJoCo. Do not start a training job, and do not
 switch or modify the working branches of the sibling repositories.
 ```
 
@@ -109,25 +109,17 @@ the structure above.
 
 ### 2. Prepare the simulation backend
 
-Full MuJoCo integration requires the official `microduck` `sim-remote-io` branch. The regular
-runtime branch in the cloned development fork does not provide the `robotd --sim` backend; this
-branch supplies the remote `RobotIo` implementation that connects `robotd` to the MuJoCo body
-service at TCP `127.0.0.1:7801` by default.
+The regular `microduck` `main` branch provides the remote `RobotIo` implementation that connects
+`robotd --sim` to the MuJoCo body service at TCP `127.0.0.1:7801` by default. Keep the sibling
+repository on an up-to-date `main`; the launcher archives that commit into isolated Studio state
+without switching or modifying its working tree. Set `MICRODUCK_SIM_REF` to a release tag when a
+reproducible runtime version is required.
 
-Fetch it once from the workspace directory:
-
-```bash
-git -C microduck remote add upstream https://github.com/pollen-robotics/microduck.git
-git -C microduck fetch upstream sim-remote-io
-```
-
-Run `remote add` only once; if `upstream` already exists, run only the second command. These
-commands add the repository address and download the branch; they do not switch the current
-`microduck` branch. The launcher reads `upstream/sim-remote-io` and extracts it into isolated Studio
-state. If it was not fetched in advance, the launcher can also download it automatically into
-`.studio-runtime/dev-stack/sim-runtime.git` without changing the sibling repository's branch or
-working tree. See [How the projects fit together](#how-the-projects-fit-together) for the role of
-`robotd --sim` in the full control path.
+Policies are no longer stored in the runtime source tree. On first launch, Studio runs the selected
+runtime's `scripts/seed-policies.sh` and stores the official set under
+`.studio-runtime/dev-stack/policies`; subsequent launches reuse it. While upgrading an existing
+Studio checkout, a cached policy set from the old embedded layout is imported if the Hub is
+temporarily unavailable; this does not change which runtime source is built.
 
 ### 3. Prepare the RL environment
 
@@ -147,23 +139,24 @@ cd ~/microduck-dev/microduck-studio
 
 Open **http://127.0.0.1:8090**. The default `native` mode starts MuJoCo in the macOS background for
 smooth native OpenGL offscreen rendering without opening the desktop Viewer. A simulation-enabled
-`robotd` and Studio run in Docker. The launcher then proves the complete control path by moving the
-simulated robot. Do not treat a reachable page alone as ready; wait for:
+`robotd`, `tofd`, and Studio run in Docker. The launcher then verifies the selected runtime revision,
+policy mount, robot/ToF/head-IMU subscriptions, movement, explicit stop, and disconnect stop.
+Do not treat a reachable page alone as ready; wait for:
 
 ```text
-control probe passed: MuJoCo moved ... m
+contract probe passed: runtime source, policies, subscription, movement ... m, stop, disconnect
 ```
 
-> The launcher never switches a sibling repository's working branch. It extracts the required
-> `sim-remote-io` runtime revision into isolated Studio state.
+> The launcher never switches a sibling repository's working branch. It extracts the selected
+> runtime revision into isolated Studio state and reports that exact ref and commit in the UI.
 
 ## Capabilities
 
 | Area | Included |
 |---|---|
 | Web control | Phone-friendly movement, enable/stop, sit/stand, roulade, and kicks |
-| Live visibility | Browser-rendered MuJoCo scene, robot telemetry, repository/job status, and model discovery |
-| Safe orchestration | Docker Compose lifecycle, an end-to-end control probe, and allowlisted RL smoke tests |
+| Live visibility | Selectable MuJoCo scenes, world/head-camera views, synchronized IMU/ToF/frame telemetry, repository/job status, and model discovery |
+| Safe orchestration | Docker Compose lifecycle, a cross-repository contract probe, and allowlisted RL smoke tests |
 
 Motion uses one persistent `robotd` connection. Releasing a control, hiding the page, disconnecting,
 or shutting Studio down sends `robot.stop`; `robotd` remains the final safety and motor authority.
@@ -176,13 +169,14 @@ Run these commands from `microduck-studio`:
 |---|---|
 | Start or cleanly restart everything and verify control | `./scripts/dev-stack.sh` |
 | Run native MuJoCo in the background (default) | `./scripts/dev-stack.sh` |
+| Start with a specific RL scene | `./scripts/dev-stack.sh --scene scene_vslam.xml` |
 | Explicitly open the desktop MuJoCo Viewer | `./scripts/dev-stack.sh --viewer` |
 | Start without the simulated movement probe | `./scripts/dev-stack.sh --skip-control-probe` |
 | Stop background MuJoCo 10 s after the last page closes | `./scripts/dev-stack.sh --stop-on-browser-close` |
 | Start the fully containerized CPU renderer | `./scripts/dev-stack.sh --sim-mode docker --gpu none` |
 | Use Linux DRI/EGL GPU passthrough | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` |
 | Use Linux NVIDIA/EGL GPU passthrough | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` |
-| Check Studio, `robotd`, and MuJoCo together | `./scripts/dev-stack.sh status` |
+| Check Studio, `robotd`, `tofd`, and MuJoCo together | `./scripts/dev-stack.sh status` |
 | Open the live terminal monitor | `./scripts/dev-stack.sh monitor` |
 | Stop only this development stack | `./scripts/dev-stack.sh stop` |
 
@@ -190,6 +184,8 @@ The `robotd` and MuJoCo status cards show Start or Restart according to connecti
 buttons use a restricted host manager created by the launcher; it accepts only fixed service
 operations. Restarting MuJoCo waits for its port and then restarts robotd as well. If the Web
 service itself is down, use `./scripts/dev-stack.sh` because the buttons are not reachable.
+The scene selector uses only `scene*.xml` files discovered in `microduck_rl`; applying a scene
+updates the validated launcher configuration and safely restarts MuJoCo followed by robotd.
 
 Only `--viewer` opens the desktop window. Closing that window stops the simulator; use the Start
 button on its status card to restore it. The default background mode uses the same native
@@ -225,9 +221,33 @@ The page has three live surfaces with deliberately different sources of truth:
 
 | Surface | Source | What you can do |
 |---|---|---|
-| **MuJoCo scene** | Cached JPEG/PNG frames rendered by `duck-body` from its authoritative `MjModel` and `MjData` snapshot | Drag to orbit, use the wheel or trackpad to zoom, and double-click to reset. The controls update the authoritative camera, not a browser-side pose reconstruction. |
-| **ROBOTD TELEMETRY** | The `robotd` monitor protocol via Studio's persistent local socket connection | Inspect policy, commands, IMU, odometry, joint targets/errors, robot thumbnail, and loop rate. It is a Web rendition of robotd telemetry, not an independent control loop. |
+| **MuJoCo scene** | Cached JPEG/PNG world frames plus the simulated 640×360 UYVY head-camera stream from `duck-body` | Switch between World and Head camera, select an allowlisted RL scene, or drag/zoom/reset the authoritative world camera. |
+| **ROBOTD TELEMETRY** | The `robotd` monitor protocol plus read-only `tofd` subscriptions | Inspect policy, commands, trunk/head IMUs, dynamic sensor poses, 8×8 ToF depth/status, odometry, joint targets/errors, robot thumbnail, and loop rate. Shared monotonic timestamps expose sensor age without introducing another control loop. |
 | **Control and service cards** | `robotd` JSON-RPC plus the launcher-installed, fixed-operation service manager | Send motion intents, enable/stop skills, and Start/Restart `robotd` or MuJoCo when the launcher is running. |
+
+### MuJoCo scene catalog
+
+The selector shows only the translated scene name. Click the **Scene** control immediately before
+the selector to copy the selected scene's `.xml` filename; **Apply** then restarts MuJoCo with the
+selected allowlisted scene.
+
+On desktop, the live FPS indicator, **World**/**Head camera** switch, **Scene** control, selector,
+and **Apply** button stay in one compact row, with **Apply** directly beside the selector. A long
+label may be clipped in the closed native selector, but its complete name remains available in the
+opened menu. Chinese mode displays only Chinese control labels; English mode displays only English
+labels.
+
+| File | Chinese name | Purpose |
+|---|---|---|
+| `scene.xml` | 标准场景 | Default flat floor with the curated ground-contact collision model. |
+| `scene_allcollisions.xml` | 全身碰撞 | Enables collision geometry for every robot part to inspect self-collision and complex contacts. |
+| `scene_apartment.xml` | 公寓场景 | Six-room furnished apartment for indoor navigation and localization experiments. |
+| `scene_backlash.xml` | 关节回差 | Standard ground-contact model with simulated servo gear play for sim-to-real checks. |
+| `scene_ball.xml` | 足球场景 | Adds a ball for kick-policy and ball-interaction testing. |
+| `scene_rollers.xml` | 滚轮场景 | Uses passive foot rollers for glide, roller-balance, and roller-policy tests. |
+| `scene_vslam.xml` | 视觉定位 | Large feature-rich room with asymmetric landmarks for VSLAM drift and loop-closure tests. |
+| `scene_walk.xml` | 行走模型 | Walking-specific robot model on a flat floor for locomotion-policy inspection. |
+| `scene_walk_backlash.xml` | 行走回差 | Walking model with simulated servo backlash for stricter sim-to-real validation. |
 
 Use the language switch in the page header to choose Chinese or English. It changes UI labels only;
 the underlying service, policy, and unit values do not change. Frame profiles are also selected in
@@ -353,7 +373,7 @@ startup fallback is `1280x720`, 24 FPS, JPEG quality 95. Override that fallback 
 
 ```bash
 docker compose ps
-docker compose logs -f studio robotd
+docker compose logs -f studio robotd tofd
 docker compose run --rm --no-deps robotctl health
 ```
 
@@ -364,7 +384,7 @@ The final command runs a temporary tool container; it does not open a Docker she
 | Symptom | Check and recovery |
 |---|---|
 | The scene stays on “Waiting for MuJoCo frames” | Run `./scripts/dev-stack.sh status`, then inspect `.studio-runtime/dev-stack/mujoco.log`. Use the MuJoCo card's Start/Restart action when Studio is online, or run `./scripts/dev-stack.sh` again if the page is unavailable. |
-| Controls do not move the simulated robot | Confirm all three status cards are connected, click **Enable RL**, then run the default launcher without `--skip-control-probe`. The launcher reports `control probe passed` only after the whole control path moved the robot. |
+| Controls do not move the simulated robot | Confirm all three status cards are connected, click **Enable RL**, then run the default launcher without `--skip-control-probe`. The launcher reports `contract probe passed` only after the cross-repository contracts pass. |
 | The Docker scene is choppy | On macOS, use the default native mode. OSMesa inside Docker is CPU rendering. On a supported Linux host, use the explicit `dri` or `nvidia` GPU mode. Reduce the profile to **Smooth** before reducing the authoritative physics rate. |
 | A desktop MuJoCo window appeared unexpectedly | The Viewer opens only when `--viewer` was supplied. Stop the stack and restart with `./scripts/dev-stack.sh`; that is the default background mode. |
 | Start/Restart buttons are unavailable | They are intentionally available only after `dev-stack.sh` has installed its local, allowlisted service manager. They cannot start the Studio Web service itself; restart the stack from a terminal for that case. |
@@ -410,7 +430,7 @@ services that commonly use port 8080.
 3. Check `docker compose logs -f studio robotd` and
    `.studio-runtime/dev-stack/mujoco.log` for disconnects or policy refusals.
 4. Run `./scripts/dev-stack.sh` again. It stops processes owned by the prior launch and repeats the
-   end-to-end control probe before reporting ready.
+   cross-repository contract probe before reporting ready.
 
 ## Training smoke tests
 

@@ -22,7 +22,7 @@ def test_manager_availability_requires_a_fresh_heartbeat(tmp_path):
 async def test_request_uses_a_fixed_file_protocol(tmp_path):
     (tmp_path / "manager.json").write_text(json.dumps({"at": time.time()}))
     controller = ServiceController(tmp_path, timeout=1)
-    pending = asyncio.create_task(controller.request("mujoco", "restart"))
+    pending = asyncio.create_task(controller.request("mujoco", "restart", scene="scene_vslam.xml"))
 
     request_path = None
     for _ in range(20):
@@ -35,6 +35,7 @@ async def test_request_uses_a_fixed_file_protocol(tmp_path):
     request = json.loads(request_path.read_text())
     assert request["service"] == "mujoco"
     assert request["action"] == "restart"
+    assert request["scene"] == "scene_vslam.xml"
 
     response_path = tmp_path / f"{request['id']}.response.json"
     response_path.write_text(json.dumps({"id": request["id"], "ok": True}))
@@ -47,3 +48,5 @@ async def test_request_rejects_commands_outside_the_allowlist(tmp_path):
     controller = ServiceController(tmp_path)
     with pytest.raises(ValueError, match="unsupported service operation"):
         await controller.request("studio", "delete")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="only be selected"):
+        await controller.request("robotd", "restart", scene="scene.xml")

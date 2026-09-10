@@ -13,15 +13,17 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .config import Settings
-from .discovery import model_catalog, repo_status
+from .discovery import model_catalog, repo_status, scene_catalog, selected_scene
 from .jobs import JobManager
 from .protocol import (
     BodyCameraClient,
     BodyClient,
     BodyFrameClient,
+    HeadCameraClient,
     ProtocolError,
     RobotdClient,
     RobotdMonitor,
+    SensorMonitor,
 )
 from .services import ServiceController, ServiceManagerUnavailable
 
@@ -58,6 +60,10 @@ class RenderCommand(BaseModel):
     height: int = Field(720, ge=1, le=2160)
 
 
+class SceneRequest(BaseModel):
+    scene: str
+
+
 RENDER_PROFILES = {
     "smooth": {"max_width": 960, "max_height": 540, "fps": 24, "quality": 82, "format": "jpeg"},
     "clear": {"max_width": 1920, "max_height": 1080, "fps": 24, "quality": 95, "format": "jpeg"},
@@ -86,6 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     robot = RobotdClient(settings.robotd_socket)
     body_client = BodyClient(settings.body_host, settings.body_port)
     frame_client = BodyFrameClient(settings.body_host, settings.body_port)
+    head_camera = HeadCameraClient(settings.body_host, settings.head_camera_port)
     jobs = JobManager(settings.microduck_rl_repo, settings.runtime_dir, settings.enable_jobs)
     services = ServiceController(settings.runtime_dir / "services")
     static = Path(__file__).parent / "static"
@@ -105,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.robot = robot
     app.state.body = body_client
     app.state.frame_client = frame_client
+    app.state.head_camera = head_camera
     app.state.jobs = jobs
     app.state.services = services
 
@@ -144,6 +152,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             robotd = {"connected": True, "health": robot_health}
         except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
             robotd = {"connected": False, "error": str(error)}
+        robotd["source"] = {
+            "ref": settings.runtime_ref,
+            "revision": settings.runtime_revision,
+        }
         return {
             "repositories": {"microduck": microduck, "microduck_rl": rl},
             "robotd": robotd,
@@ -151,18 +163,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "path": str(settings.robotd_socket),
                 "exists": settings.robotd_socket.exists(),
             },
+            "tofd_socket": {
+                "path": str(settings.tofd_socket),
+                "exists": settings.tofd_socket.exists(),
+            },
             "simulator": simulator,
             "service_manager": {"available": services.available()},
             "training_jobs_enabled": settings.enable_jobs,
         }
 
+    @app.get("/api/scenes")
+    async def scenes():
+        return {
+            "selected": await asyncio.to_thread(selected_scene, settings.runtime_dir),
+            "available": await asyncio.to_thread(scene_catalog, settings.microduck_rl_repo),
+        }
+
     @app.post("/api/services/{service}/{action}", status_code=202)
     async def manage_service(
-        service: Literal["robotd", "mujoco"], action: Literal["start", "restart"]
+        service: Literal["robotd", "mujoco"],
+        action: Literal["start", "restart"],
+        command: SceneRequest | None = None,
     ):
+        scene = command.scene if command is not None else None
+        if scene is not None and service != "mujoco":
+            raise HTTPException(422, "a scene can only be selected for MuJoCo")
+        if scene is not None and scene not in await asyncio.to_thread(
+            scene_catalog, settings.microduck_rl_repo
+        ):
+            raise HTTPException(422, "unknown simulator scene")
         try:
-            result = await services.request(service, action)
-        except ServiceManagerUnavailable as error:
+            result = await services.request(service, action, scene=scene)
+        except (ServiceManagerUnavailable, ValueError) as error:
             raise HTTPException(503, str(error)) from error
         if not result.get("ok"):
             raise HTTPException(503, result.get("message", "service operation failed"))
@@ -204,6 +236,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await websocket.send_json({"type": "error", "message": str(error)})
             except (RuntimeError, WebSocketDisconnect):
                 pass
+
+    @app.websocket("/ws/sensors")
+    async def sensors(websocket: WebSocket):
+        await websocket.accept()
+        queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=32)
+
+        async def forward(method: str) -> None:
+            try:
+                async for message in SensorMonitor(settings.tofd_socket, method).messages():
+                    if queue.full():
+                        queue.get_nowait()
+                        queue.task_done()
+                    await queue.put(message)
+            except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
+                await queue.put({"type": "sensor-error", "message": str(error)})
+
+        tasks = {
+            asyncio.create_task(forward("tof.stream")),
+            asyncio.create_task(forward("head_imu.stream")),
+        }
+        try:
+            while True:
+                await websocket.send_json(await queue.get())
+                queue.task_done()
+        except WebSocketDisconnect:
+            pass
+        except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
+            try:
+                await websocket.send_json({"type": "sensor-error", "message": str(error)})
+            except (RuntimeError, WebSocketDisconnect):
+                pass
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     @app.websocket("/ws/simulator")
     async def simulator(websocket: WebSocket):
@@ -268,6 +335,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await asyncio.gather(*tasks, return_exceptions=True)
             await frames.aclose()
             await camera.close()
+
+    @app.websocket("/ws/head-camera")
+    async def head_camera_stream(websocket: WebSocket):
+        await websocket.accept()
+        stream = head_camera.frames()
+        try:
+            await websocket.send_json(
+                {
+                    "type": "head-camera",
+                    "width": HeadCameraClient.WIDTH,
+                    "height": HeadCameraClient.HEIGHT,
+                    "format": "UYVY",
+                }
+            )
+            async for frame in stream:
+                await websocket.send_bytes(frame)
+        except WebSocketDisconnect:
+            pass
+        except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
+            try:
+                await websocket.send_json({"type": "error", "message": str(error)})
+            except (RuntimeError, WebSocketDisconnect):
+                pass
+        finally:
+            await stream.aclose()
 
     @app.get("/api/training/jobs")
     async def list_jobs():

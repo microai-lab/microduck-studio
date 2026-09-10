@@ -21,6 +21,38 @@ def atomic_json(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
+def write_mounted_json(path: Path, payload: dict) -> None:
+    """Update a bind-mounted file without replacing its inode."""
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def wait_tcp(port: int, name: str) -> None:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return
+        except OSError:
+            time.sleep(0.2)
+    raise TimeoutError(f"{name} did not listen on port {port}")
+
+
+def wait_robotd(docker: str) -> None:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            [docker, "exec", ROBOTD_CONTAINER, "test", "-S", "/runtime/robotd.sock"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+        time.sleep(0.2)
+    raise TimeoutError("robotd did not restore its runtime socket")
+
+
 def command_for(
     service: str,
     action: str,
@@ -49,6 +81,9 @@ def handle(
     docker: str,
     launchctl: str,
     body_port: int,
+    head_camera_port: int,
+    simulator_config: Path,
+    scene_directory: Path,
 ) -> None:
     working = path.with_name(path.name.replace(".request.json", ".working.json"))
     try:
@@ -66,6 +101,12 @@ def handle(
         action = request.get("action")
         if service not in {"robotd", "mujoco"} or action not in {"start", "restart"}:
             raise ValueError("unsupported service operation")
+        scene = request.get("scene")
+        if scene is not None:
+            available = {path.name for path in scene_directory.glob("scene*.xml")}
+            if service != "mujoco" or not isinstance(scene, str) or scene not in available:
+                raise ValueError("unsupported simulator scene")
+            write_mounted_json(simulator_config, {"scene": scene})
         command = command_for(service, action, mode, domain, body_label, docker, launchctl)
         result = subprocess.run(command, capture_output=True, text=True, timeout=20, check=False)
         if result.returncode:
@@ -73,15 +114,8 @@ def handle(
             payload = {"id": request_id, "ok": False, "message": detail}
         else:
             if service == "mujoco":
-                deadline = time.monotonic() + 20
-                while time.monotonic() < deadline:
-                    try:
-                        with socket.create_connection(("127.0.0.1", body_port), timeout=0.2):
-                            break
-                    except OSError:
-                        time.sleep(0.2)
-                else:
-                    raise TimeoutError(f"MuJoCo did not listen on port {body_port}")
+                wait_tcp(body_port, "MuJoCo")
+                wait_tcp(head_camera_port, "head camera")
                 subprocess.run(
                     [docker, "restart", ROBOTD_CONTAINER],
                     capture_output=True,
@@ -89,6 +123,9 @@ def handle(
                     timeout=20,
                     check=True,
                 )
+                wait_robotd(docker)
+            elif service == "robotd":
+                wait_robotd(docker)
             payload = {"id": request_id, "ok": True, "message": f"{service} {action} requested"}
     except (OSError, ValueError, subprocess.SubprocessError, json.JSONDecodeError) as error:
         payload = {"id": request_id, "ok": False, "message": str(error)}
@@ -106,6 +143,9 @@ def main() -> None:
     parser.add_argument("--docker", required=True)
     parser.add_argument("--launchctl", default="launchctl")
     parser.add_argument("--body-port", type=int, required=True)
+    parser.add_argument("--head-camera-port", type=int, required=True)
+    parser.add_argument("--simulator-config", type=Path, required=True)
+    parser.add_argument("--scene-directory", type=Path, required=True)
     args = parser.parse_args()
 
     args.directory.mkdir(parents=True, exist_ok=True)
@@ -121,6 +161,9 @@ def main() -> None:
                 docker=args.docker,
                 launchctl=args.launchctl,
                 body_port=args.body_port,
+                head_camera_port=args.head_camera_port,
+                simulator_config=args.simulator_config,
+                scene_directory=args.scene_directory,
             )
         time.sleep(0.1)
 
