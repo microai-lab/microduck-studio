@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -175,6 +176,49 @@ async def test_sensor_monitor_subscribes_and_streams_frames(
         assert await anext(stream) == {"type": frame_type, "data": {"seq": 7}}
         assert requests == [{"jsonrpc": "2.0", "id": 1, "method": method}]
     finally:
+        await stream.aclose()
+        server.close()
+        await server.wait_closed()
+        await asyncio.to_thread(socket_path.unlink, missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_sensor_monitor_allows_an_idle_stream_after_subscription():
+    socket_path = Path(f"/tmp/microduck-studio-{os.getpid()}-{uuid.uuid4().hex[:6]}.sock")
+
+    async def serve(reader, writer):
+        await reader.readline()
+        writer.write(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "accepted": True,
+                        "sensor": None,
+                        "unavailable": "disabled",
+                    },
+                }
+            ).encode()
+            + b"\n"
+        )
+        await writer.drain()
+        await reader.read()
+
+    server = await asyncio.start_unix_server(serve, socket_path)
+    stream = SensorMonitor(socket_path, "head_imu.stream", timeout=0.05).messages()
+    pending = None
+    try:
+        subscribed = await anext(stream)
+        assert subscribed["type"] == "head-imu-subscribed"
+        pending = asyncio.create_task(anext(stream))
+        await asyncio.sleep(0.1)
+        assert not pending.done()
+    finally:
+        if pending is not None:
+            pending.cancel()
+            with suppress(asyncio.CancelledError):
+                await pending
         await stream.aclose()
         server.close()
         await server.wait_closed()

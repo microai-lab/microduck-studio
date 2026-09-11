@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from microduck_studio.app import RenderCommand, create_app, render_profile
 from microduck_studio.config import Settings
@@ -36,16 +38,22 @@ def test_index_is_served(tmp_path):
         assert "Enable RL / Stand up" in response.text
         assert "实时监视器" in response.text
         assert "Live robot monitor" in response.text
-        assert "/static/styles.css?v=workbench-41" in response.text
-        assert "/static/app.js?v=workbench-41" in response.text
+        assert "/static/styles.css?v=workbench-46" in response.text
+        assert "/static/app.js?v=workbench-46" in response.text
         assert 'data-placeholder-zh="任务 ID"' in response.text
         assert 'data-placeholder-en="TASK_ID"' in response.text
         assert "loop rate" in response.text
         assert "degrees · bar reaches ±11.5°" in response.text
         assert 'data-service="robotd"' in response.text
         assert 'data-service="mujoco"' in response.text
+        assert 'data-service="tofd"' in response.text
+        assert '<strong id="tofd">—</strong>' in response.text
+        assert 'id="tofd-detail"' in response.text
+        assert response.text.count("runtime-service-card") == 3
         assert "拖动旋转" in response.text
         assert 'data-sim-view="head"' in response.text
+        assert 'data-sim-view="world" aria-pressed="true"' in response.text
+        assert 'data-sim-view="head" aria-pressed="false"' in response.text
         assert 'id="sim-scene"' in response.text
         assert 'id="scene-copy-status"' in response.text
         assert 'id="scene-copy"' in response.text
@@ -57,6 +65,23 @@ def test_index_is_served(tmp_path):
             '<option value="clear" data-zh="清晰" data-en="Clear" selected>清晰</option>'
             in response.text
         )
+
+
+def test_camera_selection_is_independent_from_motion_button_state(tmp_path):
+    with TestClient(create_app(settings(tmp_path))) as client:
+        script = client.get("/static/app.js")
+        assert script.status_code == 200
+        assert "button.setAttribute('aria-pressed'" in script.text
+        assert "document.querySelectorAll('.active')" not in script.text
+        assert "[data-vx].active,[data-vy].active,[data-vyaw].active" in script.text
+
+
+def test_sensor_websocket_closes_after_source_error_so_the_browser_reconnects(tmp_path):
+    with TestClient(create_app(settings(tmp_path))) as client:
+        with client.websocket_connect("/ws/sensors") as websocket:
+            assert websocket.receive_json()["type"] == "sensor-error"
+            with pytest.raises(WebSocketDisconnect):
+                websocket.receive_json()
 
 
 def test_training_is_opt_in(tmp_path):
@@ -78,6 +103,10 @@ def test_status_reports_the_runtime_source_that_was_actually_built(tmp_path):
 def test_service_actions_require_the_host_manager(tmp_path):
     with TestClient(create_app(settings(tmp_path))) as client:
         response = client.post("/api/services/robotd/restart")
+        assert response.status_code == 503
+        assert "service manager is not available" in response.json()["detail"]
+
+        response = client.post("/api/services/tofd/restart")
         assert response.status_code == 503
         assert "service manager is not available" in response.json()["detail"]
 

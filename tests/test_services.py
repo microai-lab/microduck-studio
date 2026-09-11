@@ -50,3 +50,27 @@ async def test_request_rejects_commands_outside_the_allowlist(tmp_path):
         await controller.request("studio", "delete")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="only be selected"):
         await controller.request("robotd", "restart", scene="scene.xml")
+
+
+@pytest.mark.asyncio
+async def test_tofd_restart_uses_the_fixed_file_protocol(tmp_path):
+    (tmp_path / "manager.json").write_text(json.dumps({"at": time.time()}))
+    controller = ServiceController(tmp_path, timeout=1)
+    pending = asyncio.create_task(controller.request("tofd", "restart"))
+
+    request_path = None
+    for _ in range(20):
+        matches = list(tmp_path.glob("*.request.json"))
+        if matches:
+            request_path = matches[0]
+            break
+        await asyncio.sleep(0.01)
+    assert request_path is not None
+    request = json.loads(request_path.read_text())
+    assert request["service"] == "tofd"
+    assert request["action"] == "restart"
+    assert "scene" not in request
+
+    response_path = tmp_path / f"{request['id']}.response.json"
+    response_path.write_text(json.dumps({"id": request["id"], "ok": True}))
+    assert (await pending)["ok"] is True

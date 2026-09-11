@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-ServiceName = Literal["robotd", "mujoco"]
+ServiceName = Literal["robotd", "mujoco", "tofd"]
 ServiceAction = Literal["start", "restart"]
 
 
@@ -33,7 +33,10 @@ class ServiceController:
     async def request(
         self, service: ServiceName, action: ServiceAction, *, scene: str | None = None
     ) -> dict:
-        if service not in {"robotd", "mujoco"} or action not in {"start", "restart"}:
+        if service not in {"robotd", "mujoco", "tofd"} or action not in {
+            "start",
+            "restart",
+        }:
             raise ValueError("unsupported service operation")
         if scene is not None and service != "mujoco":
             raise ValueError("a scene can only be selected for MuJoCo")

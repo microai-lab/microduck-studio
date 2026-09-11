@@ -46,9 +46,10 @@ body.lang-en .switch-to-zh { display: inline; }
 .bad { color: var(--red) !important; }
 .muted, .hint { color: var(--muted); }
 
-.status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 24px 0 14px; }
+.status-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 24px 0 14px; }
 .status-grid article, .panel, .monitor-panel { border: 1px solid var(--line); background: var(--panel); }
-.status-grid article { min-width: 0; padding: 13px 14px; border-radius: 14px; }
+.status-grid article { grid-column: span 3; min-width: 0; padding: 13px 14px; border-radius: 14px; }
+.status-grid .runtime-service-card { grid-column: span 2; }
 .status-grid .service-card { position: relative; padding-right: 82px; }
 .status-grid article > span, .status-grid article > small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-grid strong { display: block; margin: 4px 0; font-size: 1rem; }
@@ -103,6 +104,7 @@ button:active, button.active { transform: scale(.97); background: var(--accent);
 #sim-stream-status { width: 150px; padding-inline: 9px; align-items: center; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sim-view-switch { display: flex; gap: 3px; padding: 3px; border: 1px solid #ffffff1f; border-radius: 10px; background: #05080b99; }
 .sim-view-switch button { min-height: 34px; padding: 5px 8px; border: 0; font-size: .82rem; white-space: nowrap; }
+.sim-view-switch button[aria-pressed="true"] { transform: scale(.97); background: var(--accent); color: #181109; }
 .sim-view-switch button small, .scene-control small { font-size: .62rem; }
 .scene-control { display: flex; align-items: center; gap: 4px; color: #d7e1ed; font-size: .72rem; white-space: nowrap; }
 .scene-copy-trigger { border-color: transparent; background: transparent; color: #d7e1ed; line-height: 1.05; }
@@ -255,6 +257,8 @@ button:active, button.active { transform: scale(.97); background: var(--accent);
 
 @media (max-width: 580px) {
   .sidebar, .simulator-panel, .monitor-panel { padding-left: 14px; padding-right: 14px; }
+  .status-grid { grid-template-columns: 1fr 1fr; }
+  .status-grid article, .status-grid .runtime-service-card { grid-column: auto; }
   .actions { grid-template-columns: 1fr 1fr; }
   .stage { grid-template-rows: minmax(300px, 52vh) auto; }
   .monitor-panel { min-height: 1900px; }

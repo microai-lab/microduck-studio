@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 ROBOTD_CONTAINER = "microduck-studio-robotd"
+TOFD_CONTAINER = "microduck-studio-tofd"
 MUJOCO_CONTAINER = "microduck-studio-mujoco"
 
 
@@ -53,6 +54,22 @@ def wait_robotd(docker: str) -> None:
     raise TimeoutError("robotd did not restore its runtime socket")
 
 
+def wait_tofd(docker: str) -> None:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            [docker, "exec", TOFD_CONTAINER, "test", "-S", "/runtime/tofd.sock"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode == 0:
+            return
+        time.sleep(0.2)
+    raise TimeoutError("tofd did not restore its runtime socket")
+
+
 def command_for(
     service: str,
     action: str,
@@ -64,6 +81,8 @@ def command_for(
 ) -> list[str]:
     if service == "robotd":
         return [docker, "restart", ROBOTD_CONTAINER]
+    if service == "tofd":
+        return [docker, "restart", TOFD_CONTAINER]
     if service == "mujoco" and mode == "docker":
         return [docker, "restart", MUJOCO_CONTAINER]
     if service == "mujoco" and mode == "native":
@@ -99,7 +118,10 @@ def handle(
             raise ValueError("request id does not match its file name")
         service = request.get("service")
         action = request.get("action")
-        if service not in {"robotd", "mujoco"} or action not in {"start", "restart"}:
+        if service not in {"robotd", "mujoco", "tofd"} or action not in {
+            "start",
+            "restart",
+        }:
             raise ValueError("unsupported service operation")
         scene = request.get("scene")
         if scene is not None:
@@ -126,6 +148,8 @@ def handle(
                 wait_robotd(docker)
             elif service == "robotd":
                 wait_robotd(docker)
+            elif service == "tofd":
+                wait_tofd(docker)
             payload = {"id": request_id, "ok": True, "message": f"{service} {action} requested"}
     except (OSError, ValueError, subprocess.SubprocessError, json.JSONDecodeError) as error:
         payload = {"id": request_id, "ok": False, "message": str(error)}

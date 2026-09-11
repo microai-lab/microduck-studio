@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
     <meta name="theme-color" content="#0b0f16">
     <title>Microduck Studio</title>
-    <link rel="stylesheet" href="/static/styles.css?v=workbench-41">
+    <link rel="stylesheet" href="/static/styles.css?v=workbench-46">
   </head>
   <body>
     <main class="workbench">
@@ -18,8 +18,9 @@
         <section class="status-grid">
           <article><span>microduck</span><strong id="repo-runtime">—</strong><small id="repo-runtime-detail"></small></article>
           <article><span>microduck_rl</span><strong id="repo-rl">—</strong><small id="repo-rl-detail"></small></article>
-          <article class="service-card"><span>robotd</span><strong id="robotd">—</strong><small id="robotd-detail"></small><button id="robotd-service-action" class="service-action" data-service="robotd" disabled><span>启动</span><small class="label-en">Start</small></button></article>
-          <article class="service-card"><span>MuJoCo</span><strong id="sim">—</strong><small id="sim-detail"></small><button id="mujoco-service-action" class="service-action" data-service="mujoco" disabled><span>启动</span><small class="label-en">Start</small></button></article>
+          <article class="service-card runtime-service-card"><span>robotd</span><strong id="robotd">—</strong><small id="robotd-detail"></small><button id="robotd-service-action" class="service-action" data-service="robotd" disabled><span>启动</span><small class="label-en">Start</small></button></article>
+          <article class="service-card runtime-service-card"><span>MuJoCo</span><strong id="sim">—</strong><small id="sim-detail"></small><button id="mujoco-service-action" class="service-action" data-service="mujoco" disabled><span>启动</span><small class="label-en">Start</small></button></article>
+          <article class="service-card runtime-service-card"><span>tofd</span><strong id="tofd">—</strong><small id="tofd-detail"></small><button id="tofd-service-action" class="service-action" data-service="tofd" disabled><span>启动</span><small class="label-en">Start</small></button></article>
         </section>
 
         <section class="panel controller">
@@ -63,7 +64,7 @@
             <div class="sim-heading"><p class="eyebrow">LIVE PHYSICS</p><div class="sim-heading-row"><h2>MuJoCo 场景<small class="label-en">MuJoCo scene</small></h2><div class="sim-camera-hint"><span>拖动旋转 · 滚轮缩放 · 双击复位</span><small class="label-en">Drag · Zoom · Reset</small></div></div></div>
             <div class="sim-toolbar">
               <span id="sim-stream-status" class="pill bilingual"><span id="sim-stream-status-zh">连接中</span><small id="sim-stream-status-en" class="label-en">Connecting</small></span>
-              <div class="sim-view-switch" role="group" aria-label="Camera view"><button type="button" data-sim-view="world" class="active">世界<small class="label-en">World</small></button><button type="button" data-sim-view="head">第一视角<small class="label-en">Head camera</small></button></div>
+              <div class="sim-view-switch" role="group" aria-label="Camera view"><button type="button" data-sim-view="world" aria-pressed="true">世界<small class="label-en">World</small></button><button type="button" data-sim-view="head" aria-pressed="false">第一视角<small class="label-en">Head camera</small></button></div>
               <div class="scene-control"><button id="scene-copy" class="scene-copy-trigger" type="button" title="复制当前场景文件名 / Copy current scene filename"><span>场景</span><small class="label-en">Scene</small></button><select id="sim-scene" aria-label="MuJoCo scene"></select><button id="sim-scene-apply" type="button" disabled>应用<small class="label-en">Apply</small></button><span id="scene-copy-status" class="scene-copy-status" aria-live="polite"></span></div>
             </div>
           </div>
@@ -178,6 +179,6 @@
         </section>
       </section>
     </main>
-    <script src="/static/app.js?v=workbench-41"></script>
+    <script src="/static/app.js?v=workbench-46"></script>
   </body>
 </html>

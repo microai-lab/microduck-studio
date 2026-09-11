@@ -126,7 +126,7 @@ function setPairedStatus(id, zh, en) {
 }
 
 function renderServiceAction(service, connected, manageable) {
-  const button = $(`#${service === 'mujoco' ? 'mujoco' : 'robotd'}-service-action`);
+  const button = $(`#${service}-service-action`);
   if (serviceOperations.has(service)) return;
   const action = connected ? 'restart' : 'start';
   button.dataset.action = action;
@@ -404,6 +404,10 @@ function renderHeadImu(frame) {
 
 function connectSensors() {
   clearTimeout(sensorRetry);
+  $('#tof-stream-status').textContent = 'connecting';
+  $('#tof-stream-status').className = '';
+  $('#head-imu-stream-status').textContent = 'connecting';
+  $('#head-imu-stream-status').className = '';
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
   sensorSocket = new WebSocket(`${protocol}://${location.host}/ws/sensors`);
   sensorSocket.addEventListener('message', event => {
@@ -647,7 +651,7 @@ function setSimulatorView(view) {
   $('.sim-overlay').hidden = head;
   simulatorViewport.classList.toggle('head-view', head);
   document.querySelectorAll('[data-sim-view]').forEach(button => {
-    button.classList.toggle('active', button.dataset.simView === currentSimulatorView);
+    button.setAttribute('aria-pressed', String(button.dataset.simView === currentSimulatorView));
   });
   if (head && headCameraPendingFrame && !headCameraRenderFrame) {
     headCameraRenderFrame = requestAnimationFrame(renderHeadCameraFrame);
@@ -806,7 +810,8 @@ simulatorViewport.addEventListener('dblclick', event => {
 async function stop() {
   clearInterval(moveTimer);
   moveTimer = null;
-  document.querySelectorAll('.active').forEach(node => node.classList.remove('active'));
+  document.querySelectorAll('[data-vx].active,[data-vy].active,[data-vyaw].active')
+    .forEach(node => node.classList.remove('active'));
   try {
     acceptedResult(await api('/api/control/stop', {method: 'POST'}));
     controlMessage('已停止', 'Stopped');
@@ -930,11 +935,25 @@ async function refresh() {
     $('#sim-clock').textContent = `t ${Number(sim.sim_time || 0).toFixed(1)} s`;
     $('#sim-height').textContent = `z ${Number(sim.trunk?.[2] || 0).toFixed(3)} m`;
 
+    const tofdConnected = Boolean(data.tofd_socket?.exists);
+    setBilingual(
+      $('#tofd'),
+      tofdConnected ? '已连接' : '未连接',
+      tofdConnected ? 'Connected' : 'Disconnected'
+    );
+    $('#tofd').className = tofdConnected ? 'ok' : 'bad';
+    if (tofdConnected) {
+      setBilingual($('#tofd-detail'), '传感器流可用', 'Sensor stream available');
+    } else {
+      $('#tofd-detail').textContent = data.tofd_socket?.path || '';
+    }
+
     const manageable = Boolean(data.service_manager?.available);
     renderServiceAction('robotd', robotd.connected, manageable);
     renderServiceAction('mujoco', sim.connected, manageable);
+    renderServiceAction('tofd', tofdConnected, manageable);
 
-    const online = robotd.connected && sim.connected;
+    const online = robotd.connected && sim.connected && tofdConnected;
     setPairedStatus('overall', online ? '系统在线' : '部分离线', online ? 'System online' : 'Partially offline');
     $('#overall').className = `pill bilingual ${online ? 'ok' : 'bad'}`;
     setPairedStatus(
@@ -984,6 +1003,7 @@ $('#sim-scene-apply').addEventListener('click', applySimulatorScene);
 
 markStaticChinese();
 setInterfaceLanguage(interfaceLanguage);
+setSimulatorView(currentSimulatorView);
 $('#language-toggle').addEventListener('click', () =>
   setInterfaceLanguage(interfaceLanguage === 'zh' ? 'en' : 'zh')
 );

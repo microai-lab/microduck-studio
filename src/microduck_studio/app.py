@@ -181,7 +181,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/services/{service}/{action}", status_code=202)
     async def manage_service(
-        service: Literal["robotd", "mujoco"],
+        service: Literal["robotd", "mujoco", "tofd"],
         action: Literal["start", "restart"],
         command: SceneRequest | None = None,
     ):
@@ -258,8 +258,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
         try:
             while True:
-                await websocket.send_json(await queue.get())
+                message = await queue.get()
+                await websocket.send_json(message)
                 queue.task_done()
+                if message.get("type") == "sensor-error":
+                    await websocket.close()
+                    break
         except WebSocketDisconnect:
             pass
         except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:

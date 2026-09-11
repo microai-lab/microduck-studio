@@ -203,8 +203,12 @@ class SensorMonitor:
         await asyncio.wait_for(writer.drain(), self.timeout)
 
         try:
+            subscribed = False
             while True:
-                line = await asyncio.wait_for(reader.readline(), max(self.timeout, 2.0))
+                if subscribed:
+                    line = await reader.readline()
+                else:
+                    line = await asyncio.wait_for(reader.readline(), self.timeout)
                 if not line:
                     raise ConnectionError("tofd closed the sensor stream")
                 try:
@@ -219,6 +223,7 @@ class SensorMonitor:
                     result = message.get("result")
                     if not isinstance(result, dict) or not result.get("accepted"):
                         raise ProtocolError(f"tofd refused {self.method}")
+                    subscribed = True
                     yield {"type": f"{stream_type}-subscribed", "data": result}
                 elif message.get("method") == notification:
                     frame = message.get("params")
