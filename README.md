@@ -115,11 +115,19 @@ repository on an up-to-date `main`; the launcher archives that commit into isola
 without switching or modifying its working tree. Set `MICRODUCK_SIM_REF` to a release tag when a
 reproducible runtime version is required.
 
-Policies are no longer stored in the runtime source tree. On first launch, Studio runs the selected
-runtime's `scripts/seed-policies.sh` and stores the official set under
-`.studio-runtime/dev-stack/policies`; subsequent launches reuse it. While upgrading an existing
-Studio checkout, a cached policy set from the old embedded layout is imported if the Hub is
-temporarily unavailable; this does not change which runtime source is built.
+Policy files are no longer stored in the runtime source tree. Studio reads the policy repository
+and version from the selected runtime's `Cargo.toml`, then runs its `scripts/seed-policies.sh`.
+Each pin has a separate cache under `.studio-runtime/dev-stack/policies/<owner--repo>/<version>`;
+later launches can reuse a complete cached set offline. The full manifest and every listed ONNX
+file must be present before startup. Older imported caches stay on disk; they do not silently
+replace the policy set required by a newer runtime.
+
+The current integration targets `microduck` **0.17.8** (IPC API **44**) and the October 12, 2026
+`microduck_rl` `develop` revision, with the Fork's visualization service retained. The runtime
+selects `pollen-robotics/microduck-policies@v8`. Studio leaves policy slot paths, gains, and skill
+timing to `robotd` and that set's manifest; the default walking/standing gait is `velstand.onnx`.
+The runtime image also includes the upstream pickup detector model, and embeds the selected Git
+revision into the binaries so `hello` reports the source that actually ran.
 
 ### 3. Prepare the RL environment
 
@@ -160,6 +168,12 @@ contract probe passed: runtime source, policies, subscription, movement ... m, s
 
 Motion uses one persistent `robotd` connection. Releasing a control, hiding the page, disconnecting,
 or shutting Studio down sends `robot.stop`; `robotd` remains the final safety and motor authority.
+
+The robotd card reports the running daemon version and API alongside the built source revision.
+A different API is shown as a version difference; individual RPC responses remain authoritative.
+Runtime refusals are displayed with their reason, and monitor disconnections close the WebSocket
+so the browser can reconnect. The monitor includes measured joint velocity and current when
+reported; a missing value is shown as `—`, not zero. A picked-up robot is explicitly marked paused.
 
 ## Daily workflow
 
@@ -451,6 +465,7 @@ uv sync --extra dev
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
+node --test tests/test_frontend.mjs
 ```
 
 ## Safety

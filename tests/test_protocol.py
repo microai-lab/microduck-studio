@@ -3,20 +3,175 @@ import base64
 import json
 import os
 import uuid
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from microduck_studio.protocol import (
+    ROBOTD_API_VERSION,
     BodyCameraClient,
     BodyFrameClient,
     HeadCameraClient,
     ProtocolError,
     RobotdClient,
     RobotdMonitor,
+    RpcError,
     SensorMonitor,
 )
+
+
+@asynccontextmanager
+async def robotd_peer(handler):
+    socket_path = Path(f"/tmp/microduck-studio-{os.getpid()}-{uuid.uuid4().hex[:6]}.sock")
+
+    async def serve(reader, writer):
+        try:
+            await handler(reader, writer)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_unix_server(serve, socket_path)
+    try:
+        yield socket_path
+    finally:
+        server.close()
+        await server.wait_closed()
+        await asyncio.to_thread(socket_path.unlink, missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_hello_reports_skew_and_rpc_refusal_preserves_the_connection():
+    connections = 0
+    messages = []
+    refusal = {"code": -32602, "message": "unknown skill", "data": {"skill": "new_skill"}}
+
+    async def serve(reader, writer):
+        nonlocal connections
+        connections += 1
+        while line := await reader.readline():
+            request = json.loads(line)
+            messages.append(request)
+            reply = {"jsonrpc": "2.0", "id": request["id"]}
+            if request["method"] == "hello":
+                reply["result"] = {"api_version": 43, "daemon_version": "0.17.7", "revision": None}
+            elif request["method"] == "robot.do":
+                reply["error"] = refusal
+            else:
+                reply["result"] = {"accepted": True}
+            writer.write(b'{"jsonrpc":"2.0","method":"robot.notice","params":{}}\n')
+            writer.write(json.dumps(reply).encode() + b"\n")
+            await writer.drain()
+
+    async with robotd_peer(serve) as socket_path:
+        client = RobotdClient(socket_path)
+        try:
+            assert (await client.hello())["api_version"] == 43
+            with pytest.raises(RpcError) as caught:
+                await client.request("robot.do", {"skill": "new_skill"})
+            assert caught.value.error == refusal
+            assert await client.request("robot.stop") == {"accepted": True}
+            assert connections == 1
+            assert messages[0]["params"] == {"api_version": ROBOTD_API_VERSION}
+            assert [message["method"] for message in messages] == [
+                "hello",
+                "robot.do",
+                "robot.stop",
+            ]
+        finally:
+            await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"id": 1, "result": {}},
+        {"jsonrpc": "1.0", "id": 1, "result": {}},
+        {"jsonrpc": "2.0", "id": True, "result": {}},
+        {"jsonrpc": "2.0", "id": "1", "result": {}},
+        {"jsonrpc": "2.0", "id": 1},
+        {"jsonrpc": "2.0", "id": 1, "result": {}, "error": None},
+        {"jsonrpc": "2.0", "id": 1, "error": "refused"},
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": True, "message": "refused"}},
+        pytest.param("x" * 65536, id="oversized"),
+    ],
+)
+async def test_malformed_rpc_response_closes_the_control_connection(response):
+    closed = asyncio.Event()
+
+    async def serve(reader, writer):
+        await reader.readline()
+        writer.write(json.dumps(response).encode() + b"\n")
+        await writer.drain()
+        await reader.read()
+        closed.set()
+
+    async with robotd_peer(serve) as socket_path:
+        client = RobotdClient(socket_path)
+        try:
+            with pytest.raises(ProtocolError):
+                await client.request("robot.stop")
+            await asyncio.wait_for(closed.wait(), 1)
+        finally:
+            await client.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_request_closes_socket_before_the_next_command():
+    received = asyncio.Event()
+    closed = asyncio.Event()
+    methods = []
+
+    async def serve(reader, writer):
+        request = json.loads(await reader.readline())
+        methods.append(request["method"])
+        if request["method"] == "robot.do":
+            received.set()
+            await reader.read()
+            closed.set()
+        else:
+            writer.write(
+                json.dumps(
+                    {"jsonrpc": "2.0", "id": request["id"], "result": {"accepted": True}}
+                ).encode()
+                + b"\n"
+            )
+            await writer.drain()
+            await reader.read()
+
+    async with robotd_peer(serve) as socket_path:
+        client = RobotdClient(socket_path)
+        try:
+            pending = asyncio.create_task(client.request("robot.do", {"skill": "roulade"}))
+            await asyncio.wait_for(received.wait(), 1)
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+            await asyncio.wait_for(closed.wait(), 1)
+            assert await client.request("robot.stop") == {"accepted": True}
+            assert methods == ["robot.do", "robot.stop"]
+        finally:
+            await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sensor", [False, True])
+async def test_subscription_write_failure_closes_the_stream(monkeypatch, sensor):
+    writer = Mock()
+    writer.drain = AsyncMock(side_effect=ConnectionResetError("subscription failed"))
+    writer.wait_closed = AsyncMock()
+    monkeypatch.setattr(asyncio, "open_unix_connection", AsyncMock(return_value=(Mock(), writer)))
+    monitor = (
+        SensorMonitor(Path("unused"), "tof.stream") if sensor else RobotdMonitor(Path("unused"))
+    )
+    stream = monitor.messages()
+    with pytest.raises(ConnectionResetError, match="subscription failed"):
+        await anext(stream)
+    writer.close.assert_called_once()
+    writer.wait_closed.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -105,20 +260,24 @@ async def test_discrete_request_is_not_retried_after_uncertain_delivery():
 async def test_monitor_subscribes_at_requested_rate_and_streams_state():
     socket_path = Path(f"/tmp/microduck-studio-{os.getpid()}-{uuid.uuid4().hex[:6]}.sock")
     messages = []
+    subscribed = {"accepted": True, "walk": "velstand.onnx", "skills": ["jump", "roulade"]}
+    state = {
+        "policy": "walk",
+        "velocities": [0.25],
+        "currents_ma": [83.5],
+        "t_ns": 123456789,
+        "skeleton": [{"p": [0, 0, 0], "q": [1, 0, 0, 0]}],
+    }
 
     async def serve(reader, writer):
         request = json.loads(await reader.readline())
         messages.append(request)
         writer.write(
-            json.dumps(
-                {"jsonrpc": "2.0", "id": request["id"], "result": {"accepted": True}}
-            ).encode()
+            json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": subscribed}).encode()
             + b"\n"
         )
         writer.write(
-            json.dumps(
-                {"jsonrpc": "2.0", "method": "robot.state", "params": {"policy": "walk"}}
-            ).encode()
+            json.dumps({"jsonrpc": "2.0", "method": "robot.state", "params": state}).encode()
             + b"\n"
         )
         await writer.drain()
@@ -127,8 +286,8 @@ async def test_monitor_subscribes_at_requested_rate_and_streams_state():
     server = await asyncio.start_unix_server(serve, socket_path)
     stream = RobotdMonitor(socket_path).messages(hz=10)
     try:
-        assert await anext(stream) == {"type": "subscribed", "data": {"accepted": True}}
-        assert await anext(stream) == {"type": "state", "data": {"policy": "walk"}}
+        assert await anext(stream) == {"type": "subscribed", "data": subscribed}
+        assert await anext(stream) == {"type": "state", "data": state}
         assert messages[0]["method"] == "robot.subscribe"
         assert messages[0]["params"] == {"hz": 10}
     finally:

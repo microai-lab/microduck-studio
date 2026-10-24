@@ -11,9 +11,53 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+ROBOTD_API_VERSION = 44
+
 
 class ProtocolError(RuntimeError):
     pass
+
+
+class RpcError(ProtocolError):
+    """A well-formed refusal from the daemon, rather than a broken connection."""
+
+    def __init__(self, error: dict[str, Any]):
+        super().__init__(error["message"])
+        self.error = error
+
+
+def _rpc_message(line: bytes) -> dict[str, Any]:
+    try:
+        message = json.loads(line)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ProtocolError("invalid JSON-RPC message") from error
+    if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+        raise ProtocolError("invalid JSON-RPC message")
+    return message
+
+
+def _rpc_result(message: dict[str, Any], request_id: int) -> Any:
+    if type(message.get("id")) is not int or message["id"] != request_id:
+        raise ProtocolError("unexpected JSON-RPC response id")
+    if ("result" in message) == ("error" in message):
+        raise ProtocolError("JSON-RPC response must contain either result or error")
+    if "error" in message:
+        error = message["error"]
+        if (
+            not isinstance(error, dict)
+            or type(error.get("code")) is not int
+            or not isinstance(error.get("message"), str)
+        ):
+            raise ProtocolError("invalid JSON-RPC error")
+        raise RpcError(error)
+    return message["result"]
+
+
+async def _rpc_line(reader: asyncio.StreamReader) -> bytes:
+    try:
+        return await reader.readline()
+    except ValueError as error:
+        raise ProtocolError("JSON-RPC message exceeds the stream limit") from error
 
 
 @dataclass(frozen=True)
@@ -30,8 +74,8 @@ class SimulatorFrame:
 class RobotdClient:
     """Persistent newline-delimited JSON-RPC client.
 
-    Persistence is a safety requirement, not an optimization: robotd clears motion when a control
-    client disconnects.
+    Keep control traffic on one socket. Motion expiry belongs to robotd's deadman;
+    closing a connection is not an acknowledgement that the robot stopped.
     """
 
     def __init__(self, socket_path: Path, timeout: float = 2.0):
@@ -64,6 +108,21 @@ class RobotdClient:
     async def request(self, method: str, params: dict[str, Any] | None = None) -> Any:
         return await self._send(method, params, notification=False)
 
+    async def hello(self) -> dict[str, Any]:
+        result = await self.request("hello", {"api_version": ROBOTD_API_VERSION})
+        if (
+            not isinstance(result, dict)
+            or type(result.get("api_version")) is not int
+            or result["api_version"] < 1
+            or any(
+                result.get(key) is not None and not isinstance(result[key], str)
+                for key in ("daemon_version", "revision")
+            )
+        ):
+            raise ProtocolError("invalid robotd hello result")
+        # Upstream reports version skew; individual methods decide compatibility.
+        return result
+
     async def _send(self, method: str, params: dict[str, Any] | None, *, notification: bool) -> Any:
         async with self._lock:
             message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
@@ -77,6 +136,9 @@ class RobotdClient:
             for attempt in range(2):
                 try:
                     await self._connect()
+                except asyncio.CancelledError:
+                    await self.close()
+                    raise
                 except (OSError, ConnectionError, TimeoutError):
                     await self.close()
                     if attempt:
@@ -87,6 +149,9 @@ class RobotdClient:
                 try:
                     self._writer.write(wire)
                     await asyncio.wait_for(self._writer.drain(), self.timeout)
+                except asyncio.CancelledError:
+                    await self.close()
+                    raise
                 except (OSError, ConnectionError, TimeoutError):
                     await self.close()
                     if notification and not attempt:
@@ -98,27 +163,27 @@ class RobotdClient:
 
                 assert self._reader is not None
                 try:
-                    line = await asyncio.wait_for(self._reader.readline(), self.timeout)
-                    if not line:
-                        raise ConnectionError("robotd closed the socket")
-                except (OSError, ConnectionError, TimeoutError):
+                    # A notification may precede the answer. Bound the whole exchange,
+                    # so unsolicited traffic cannot keep a request pending forever.
+                    async with asyncio.timeout(self.timeout):
+                        while True:
+                            line = await _rpc_line(self._reader)
+                            if not line:
+                                raise ConnectionError("robotd closed the socket")
+                            response = _rpc_message(line)
+                            if "id" not in response and isinstance(response.get("method"), str):
+                                continue
+                            return _rpc_result(response, request_id)
+                except RpcError:
+                    # The daemon answered this request; the socket is still aligned.
+                    raise
+                except (OSError, ConnectionError, TimeoutError, ProtocolError):
                     await self.close()
                     raise
-
-                try:
-                    response = json.loads(line)
-                except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                except asyncio.CancelledError:
+                    # A late response must never become the next request's answer.
                     await self.close()
-                    raise ProtocolError("invalid JSON-RPC response") from error
-                if not isinstance(response, dict):
-                    await self.close()
-                    raise ProtocolError("invalid JSON-RPC response")
-                if response.get("id") != request_id:
-                    await self.close()
-                    raise ProtocolError("unexpected JSON-RPC response id")
-                if error := response.get("error"):
-                    raise ProtocolError(error.get("message", str(error)))
-                return response.get("result")
+                    raise
             raise AssertionError("unreachable")
 
 
@@ -143,31 +208,25 @@ class RobotdMonitor:
             "method": "robot.subscribe",
             "params": {"hz": hz},
         }
-        writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
-        await asyncio.wait_for(writer.drain(), self.timeout)
-
         try:
+            writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+            await asyncio.wait_for(writer.drain(), self.timeout)
+            subscribed = False
             while True:
-                line = await asyncio.wait_for(reader.readline(), max(self.timeout, 2.0))
+                line = await asyncio.wait_for(_rpc_line(reader), max(self.timeout, 2.0))
                 if not line:
                     raise ConnectionError("robotd closed the monitor stream")
-                try:
-                    message = json.loads(line)
-                except (json.JSONDecodeError, UnicodeDecodeError) as error:
-                    raise ProtocolError("invalid robot monitor message") from error
-                if not isinstance(message, dict):
-                    raise ProtocolError("invalid robot monitor message")
+                message = _rpc_message(line)
 
-                if message.get("id") == request_id:
-                    if error := message.get("error"):
-                        raise ProtocolError(error.get("message", str(error)))
-                    result = message.get("result")
-                    if not isinstance(result, dict) or not result.get("accepted"):
+                if "id" in message:
+                    result = _rpc_result(message, request_id)
+                    if not isinstance(result, dict) or result.get("accepted") is not True:
                         raise ProtocolError("robotd refused the monitor subscription")
+                    subscribed = True
                     yield {"type": "subscribed", "data": result}
                 elif message.get("method") == "robot.state":
                     state = message.get("params")
-                    if not isinstance(state, dict):
+                    if not subscribed or not isinstance(state, dict):
                         raise ProtocolError("invalid robot.state notification")
                     yield {"type": "state", "data": state}
         finally:
@@ -199,35 +258,27 @@ class SensorMonitor:
             asyncio.open_unix_connection(self.socket_path), self.timeout
         )
         request = {"jsonrpc": "2.0", "id": 1, "method": self.method}
-        writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
-        await asyncio.wait_for(writer.drain(), self.timeout)
-
         try:
+            writer.write(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+            await asyncio.wait_for(writer.drain(), self.timeout)
             subscribed = False
             while True:
                 if subscribed:
-                    line = await reader.readline()
+                    line = await _rpc_line(reader)
                 else:
-                    line = await asyncio.wait_for(reader.readline(), self.timeout)
+                    line = await asyncio.wait_for(_rpc_line(reader), self.timeout)
                 if not line:
                     raise ConnectionError("tofd closed the sensor stream")
-                try:
-                    message = json.loads(line)
-                except (json.JSONDecodeError, UnicodeDecodeError) as error:
-                    raise ProtocolError("invalid tofd sensor message") from error
-                if not isinstance(message, dict):
-                    raise ProtocolError("invalid tofd sensor message")
-                if message.get("id") == 1:
-                    if error := message.get("error"):
-                        raise ProtocolError(error.get("message", str(error)))
-                    result = message.get("result")
-                    if not isinstance(result, dict) or not result.get("accepted"):
+                message = _rpc_message(line)
+                if "id" in message:
+                    result = _rpc_result(message, 1)
+                    if not isinstance(result, dict) or result.get("accepted") is not True:
                         raise ProtocolError(f"tofd refused {self.method}")
                     subscribed = True
                     yield {"type": f"{stream_type}-subscribed", "data": result}
                 elif message.get("method") == notification:
                     frame = message.get("params")
-                    if not isinstance(frame, dict):
+                    if not subscribed or not isinstance(frame, dict):
                         raise ProtocolError(f"invalid {notification} notification")
                     yield {"type": stream_type, "data": frame}
         finally:

@@ -104,8 +104,19 @@ async function api(path, options = {}) {
     headers: {'content-type': 'application/json', ...(options.headers || {})},
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+  if (!response.ok) throw new Error(errorText(data.detail ?? data) || `HTTP ${response.status}`);
   return data;
+}
+
+function errorText(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(errorText).filter(Boolean).join('; ');
+  if (value && typeof value === 'object') {
+    const parts = ['message', 'reason', 'msg', 'detail', 'data']
+      .filter(key => value[key] != null).map(key => errorText(value[key])).filter(Boolean);
+    return [...new Set(parts)].join(' · ') || JSON.stringify(value);
+  }
+  return value == null ? '' : String(value);
 }
 
 function setBilingual(node, zh, en) {
@@ -140,6 +151,39 @@ function renderServiceAction(service, connected, manageable) {
   button.title = manageable ? `${zh} ${service}` : '请通过 dev-stack.sh 启动服务管理器';
 }
 
+function renderRobotdService(robotd, socketPath) {
+  setBilingual($('#robotd'), robotd.connected ? '已连接' : '未连接', robotd.connected ? 'Connected' : 'Disconnected');
+  $('#robotd').className = robotd.connected ? 'ok' : 'bad';
+  const detail = $('#robotd-detail');
+  const lines = [];
+  const line = (text, className = '') => {
+    const node = document.createElement('span');
+    node.textContent = text;
+    node.className = className;
+    lines.push(node);
+    return node;
+  };
+  const hello = robotd.hello;
+  if (hello) {
+    line(`daemon ${hello.daemon_version || 'unknown'} · API ${hello.api_version ?? 'unknown'}`);
+    line(`revision ${hello.revision || 'unknown'}`);
+  } else if (robotd.connected) {
+    setBilingual(line(''), '运行版本未报告', 'Runtime version not reported');
+  }
+  const source = robotd.source || {};
+  if (source.ref || source.revision) {
+    const revision = source.revision && source.revision !== 'unknown' ? source.revision.slice(0, 12) : 'unknown';
+    line(`build ${source.ref || 'unknown'} @ ${revision}`);
+  }
+  if (robotd.protocol?.matches === false) {
+    const clientApi = robotd.protocol.client_api_version;
+    setBilingual(line('', 'warning'), `API 版本不同 · Studio ${clientApi}`, `API differs · Studio ${clientApi}`);
+  }
+  if (!robotd.connected) line(errorText(robotd.error) || socketPath || '', 'bad');
+  detail.replaceChildren(...lines);
+  detail.title = lines.map(node => node.textContent).join('\n');
+}
+
 async function manageService(button) {
   const service = button.dataset.service;
   const action = button.dataset.action;
@@ -169,7 +213,7 @@ function controlMessage(zh, en, error = false) {
 }
 
 function acceptedResult(result) {
-  if (result?.accepted === false) throw new Error(result.reason || 'robotd refused the command');
+  if (result?.accepted === false) throw new Error(errorText(result.reason) || 'robotd refused the command');
   return result;
 }
 
@@ -202,17 +246,43 @@ function sensorAge(tNs) {
   return `offset ${signed((Number(tNs) - latestRobotTNs) / 1e6, 1)} ms`;
 }
 
+function loadedSkillNames(info) {
+  if (Array.isArray(info?.skills)) {
+    return info.skills.map(skill => typeof skill === 'string' ? skill : skill?.name)
+      .filter(name => typeof name === 'string' && name.length > 0);
+  }
+  // Older subscriptions reported one loaded file per built-in one-shot.
+  return ['roulade', 'kick_left', 'kick_right'].filter(name => Boolean(info?.[name]));
+}
+
+function renderSkillAvailability(info) {
+  const loaded = new Set(loadedSkillNames(info));
+  if (info?.sitstand) loaded.add('sit_toggle');
+  if (info?.ground_pick) loaded.add('ground_pick');
+  document.querySelectorAll('[data-skill]').forEach(button => {
+    const available = Boolean(info && info.accepted !== false && !info.unavailable && loaded.has(button.dataset.skill));
+    button.disabled = !available;
+    button.setAttribute('aria-disabled', String(!available));
+    button.title = available ? '' : !info
+      ? '等待运行时技能列表 / Waiting for robotd skills'
+      : errorText(info.unavailable) || '运行时未加载此技能 / Skill not loaded by robotd';
+  });
+}
+
 function renderMonitorPolicy() {
-  if (!monitorPolicyInfo) return;
   const info = monitorPolicyInfo;
+  renderSkillAvailability(info);
+  if (!info) {
+    $('#monitor-policy-files').textContent = 'waiting for subscription…';
+    return;
+  }
   if (info.unavailable) {
-    $('#monitor-policy-files').textContent = `unavailable · ${info.unavailable}`;
+    $('#monitor-policy-files').textContent = `unavailable · ${errorText(info.unavailable)}`;
     return;
   }
   const policies = [info.walk && `walking ${info.walk}`, info.stand && `standing ${info.stand}`].filter(Boolean);
   const skills = [
-    info.sitstand && 'sit', info.ground_pick && 'pick', info.kick_left && 'kick-left',
-    info.kick_right && 'kick-right', info.roulade && 'roulade',
+    info.sitstand && 'sit_toggle', info.ground_pick && 'ground_pick', ...loadedSkillNames(info),
   ].filter(Boolean);
   $('#monitor-policy-files').textContent = `${policies.join(' · ') || 'no policy names'}${skills.length ? ` · skills ${skills.join('+')}` : ''}`;
 }
@@ -317,6 +387,16 @@ function renderMonitor(state) {
   $('#monitor-gravity-z').textContent = signed(gravity[2]);
   $('#monitor-upright').textContent = safety.fallen ? 'FALLEN' : 'upright';
   $('#monitor-upright').className = safety.fallen ? 'bad' : 'ok';
+  const pickup = $('#monitor-safety');
+  if (safety.picked_up === true) {
+    setBilingual(pickup, '抱起暂停 · 控制策略已暂停', 'Picked up · policy paused');
+    pickup.className = 'warning';
+  } else {
+    setBilingual(pickup,
+      safety.picked_up === false ? '未抱起' : '抱起状态未报告',
+      safety.picked_up === false ? 'Not picked up' : 'Pickup status not reported');
+    pickup.className = '';
+  }
 
   $('#monitor-imu-gyro').textContent = vector(state.imu?.gyro);
   $('#monitor-imu-quat').textContent = vector(state.imu?.quat);
@@ -342,19 +422,30 @@ function renderMonitor(state) {
 
   const joints = state.joints || [];
   const targets = state.targets || [];
+  const velocities = state.velocities || [];
+  const currents = state.currents_ma || [];
   $('#monitor-joints').replaceChildren(...jointNames.map((name, index) => {
-    const measured = Number(joints[index] || 0);
-    const target = Number(targets[index] || 0);
-    const error = measured - target;
-    const magnitude = Math.abs(error) / 0.20;
-    const tone = magnitude < 0.25 ? 'good' : magnitude < 0.6 ? 'warn' : 'bad';
+    const measured = finiteTelemetry(joints[index]);
+    const target = finiteTelemetry(targets[index]);
+    const error = measured !== null && target !== null ? measured - target : null;
+    const magnitude = error === null ? 0 : Math.abs(error) / 0.20;
+    const tone = error === null ? '' : magnitude < 0.25 ? 'good' : magnitude < 0.6 ? 'warn' : 'bad';
     const width = Math.min(50, magnitude * 50);
     const left = error < 0 ? 50 - width : 50;
     const row = document.createElement('div');
     row.className = 'joint-grid joint-row';
-    row.innerHTML = `<span>${name}</span><span class="joint-value">${signed(degrees(measured))}°</span><span class="joint-value">${signed(degrees(target))}°</span><span class="joint-value joint-error ${tone}">${signed(degrees(error))}°</span><span class="deviation"><i class="deviation-bar ${tone}" style="left:${left}%;width:${width}%"></i>${magnitude > 1 ? `<b class="deviation-edge" style="${error < 0 ? 'left:0' : 'right:0'}">${error < 0 ? '«' : '»'}</b>` : ''}</span>`;
+    row.innerHTML = `<span>${name}</span><span class="joint-value">${telemetryValue(measured, 2, 180 / Math.PI, '°')}</span><span class="joint-value">${telemetryValue(target, 2, 180 / Math.PI, '°')}</span><span class="joint-value joint-error ${tone}">${telemetryValue(error, 2, 180 / Math.PI, '°')}</span><span class="joint-value joint-velocity">${telemetryValue(velocities[index])}</span><span class="joint-value joint-current">${telemetryValue(currents[index], 0)}</span><span class="deviation">${error === null ? '' : `<i class="deviation-bar ${tone}" style="left:${left}%;width:${width}%"></i>`}${magnitude > 1 ? `<b class="deviation-edge" style="${error < 0 ? 'left:0' : 'right:0'}">${error < 0 ? '«' : '»'}</b>` : ''}</span>`;
     return row;
   }));
+}
+
+function finiteTelemetry(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function telemetryValue(value, digits = 2, scale = 1, suffix = '') {
+  const number = finiteTelemetry(value);
+  return number === null ? '—' : `${signed(number * scale, digits)}${suffix}`;
 }
 
 function renderTof(frame) {
@@ -445,6 +536,8 @@ function connectSensors() {
 
 function connectMonitor() {
   clearTimeout(monitorRetry);
+  monitorPolicyInfo = null;
+  renderMonitorPolicy();
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
   monitorSocket = new WebSocket(`${protocol}://${location.host}/ws/monitor`);
   monitorStatus('连接中', 'Connecting');
@@ -461,6 +554,8 @@ function connectMonitor() {
     }
   });
   monitorSocket.addEventListener('close', () => {
+    monitorPolicyInfo = null;
+    renderMonitorPolicy();
     monitorStatus('已断开', 'Disconnected', 'bad');
     monitorRetry = setTimeout(connectMonitor, 2000);
   });
@@ -816,7 +911,7 @@ async function stop() {
     acceptedResult(await api('/api/control/stop', {method: 'POST'}));
     controlMessage('已停止', 'Stopped');
   } catch (error) {
-    controlMessage(error.message, 'Control error', true);
+    controlMessage(error.message, error.message, true);
   }
 }
 
@@ -837,7 +932,7 @@ async function sendMove(button) {
     const commandText = JSON.stringify(command);
     controlMessage(`移动 ${commandText}`, `Moving ${commandText}`);
   } catch (error) {
-    controlMessage(error.message, 'Control error', true);
+    controlMessage(error.message, error.message, true);
   }
 }
 
@@ -864,7 +959,7 @@ $('[data-action="enable"]').addEventListener('click', async () => {
     acceptedResult(await api('/api/control/enable', {method: 'POST', body: '{"on":true}'}));
     controlMessage('RL 已启用', 'RL enabled');
   } catch (error) {
-    controlMessage(error.message, 'Control error', true);
+    controlMessage(error.message, error.message, true);
   }
 });
 
@@ -882,7 +977,7 @@ document.querySelectorAll('[data-skill]').forEach(button =>
         `Accepted: ${button.dataset.labelEn}`
       );
     } catch (error) {
-      controlMessage(error.message, 'Control error', true);
+      controlMessage(error.message, error.message, true);
     }
   })
 );
@@ -914,15 +1009,10 @@ async function refresh() {
     }
 
     const robotd = data.robotd;
-    setBilingual($('#robotd'), robotd.connected ? '已连接' : '未连接', robotd.connected ? 'Connected' : 'Disconnected');
-    $('#robotd').className = robotd.connected ? 'ok' : 'bad';
+    renderRobotdService(robotd, data.robotd_socket?.path);
     if (robotd.connected) {
-      const source = robotd.source || {};
-      const revision = source.revision && source.revision !== 'unknown' ? source.revision.slice(0, 12) : 'unknown';
-      $('#robotd-detail').textContent = `${source.ref || 'unknown'} @ ${revision}`;
       renderMonitorHealth(robotd.health);
     } else {
-      $('#robotd-detail').textContent = robotd.error || data.robotd_socket.path;
       renderMonitorHealth(null);
     }
 

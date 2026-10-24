@@ -18,7 +18,7 @@
         <section class="status-grid">
           <article><span>microduck</span><strong id="repo-runtime">—</strong><small id="repo-runtime-detail"></small></article>
           <article><span>microduck_rl</span><strong id="repo-rl">—</strong><small id="repo-rl-detail"></small></article>
-          <article class="service-card runtime-service-card"><span>robotd</span><strong id="robotd">—</strong><small id="robotd-detail"></small><button id="robotd-service-action" class="service-action" data-service="robotd" disabled><span>启动</span><small class="label-en">Start</small></button></article>
+          <article class="service-card runtime-service-card robotd-service-card"><span>robotd</span><strong id="robotd">—</strong><small id="robotd-detail"></small><button id="robotd-service-action" class="service-action" data-service="robotd" disabled><span>启动</span><small class="label-en">Start</small></button></article>
           <article class="service-card runtime-service-card"><span>MuJoCo</span><strong id="sim">—</strong><small id="sim-detail"></small><button id="mujoco-service-action" class="service-action" data-service="mujoco" disabled><span>启动</span><small class="label-en">Start</small></button></article>
           <article class="service-card runtime-service-card"><span>tofd</span><strong id="tofd">—</strong><small id="tofd-detail"></small><button id="tofd-service-action" class="service-action" data-service="tofd" disabled><span>启动</span><small class="label-en">Start</small></button></article>
         </section>
@@ -31,10 +31,10 @@
           <div class="actions">
             <button class="primary" data-action="enable"><span>启用 RL / 站起</span><small class="label-en">Enable RL / Stand up</small></button>
             <button class="danger" data-action="stop"><span>停止</span><small class="label-en">Stop</small></button>
-            <button data-skill="sit_toggle" data-label-zh="坐下 / 起身" data-label-en="Sit / Stand"><span>坐下 / 起身</span><small class="label-en">Sit / Stand</small></button>
-            <button data-skill="roulade" data-label-zh="前滚翻" data-label-en="Forward roll"><span>前滚翻</span><small class="label-en">Forward roll</small></button>
-            <button data-skill="kick_left" data-label-zh="左踢" data-label-en="Kick left"><span>左踢</span><small class="label-en">Kick left</small></button>
-            <button data-skill="kick_right" data-label-zh="右踢" data-label-en="Kick right"><span>右踢</span><small class="label-en">Kick right</small></button>
+            <button data-skill="sit_toggle" data-label-zh="坐下 / 起身" data-label-en="Sit / Stand" disabled><span>坐下 / 起身</span><small class="label-en">Sit / Stand</small></button>
+            <button data-skill="roulade" data-label-zh="前滚翻" data-label-en="Forward roll" disabled><span>前滚翻</span><small class="label-en">Forward roll</small></button>
+            <button data-skill="kick_left" data-label-zh="左踢" data-label-en="Kick left" disabled><span>左踢</span><small class="label-en">Kick left</small></button>
+            <button data-skill="kick_right" data-label-zh="右踢" data-label-en="Kick right" disabled><span>右踢</span><small class="label-en">Kick right</small></button>
           </div>
           <div class="pad">
             <button data-vyaw="1.5">↶<small>左转<span class="label-en">Turn left</span></small></button>
@@ -110,6 +110,7 @@
                 </div>
                 <div class="terminal-lines">
                   <div><span>limits</span><strong id="monitor-limits">—</strong></div>
+                  <div><span>safety</span><strong id="monitor-safety">—</strong></div>
                   <div><span>head</span><strong id="monitor-head">—</strong></div>
                   <div><span>odom</span><strong id="monitor-odom">—</strong></div>
                   <div><span>power</span><strong id="monitor-power">asking robotd for the battery…</strong></div>
@@ -138,10 +139,12 @@
                 </div>
               </section>
 
-              <section class="terminal-block joints-block">
-                <div class="terminal-legend"><span>joints</span><small>degrees · bar reaches ±11.5°</small></div>
-                <div class="joint-grid joint-grid-head"><span>joint</span><span>measured</span><span>commanded</span><span>error</span><span>deviation</span></div>
-                <div id="monitor-joints" class="joint-rows"><p class="muted">等待 robot.state / Waiting for robot.state</p></div>
+              <section class="terminal-block joints-block" tabindex="0" aria-label="Joint telemetry, scroll horizontally for all columns">
+                <div class="terminal-legend"><span>joints</span><small title="Position in degrees; deviation bars reach ±11.5°">° · rad/s · mA · ↔ scroll</small></div>
+                <div class="joint-table">
+                  <div class="joint-grid joint-grid-head"><span>joint</span><span>measured</span><span>commanded</span><span>error</span><span>rad/s</span><span>mA</span><span>deviation</span></div>
+                  <div id="monitor-joints" class="joint-rows"><p class="muted">等待 robot.state / Waiting for robot.state</p></div>
+                </div>
               </section>
 
               <section class="terminal-block loop-block">

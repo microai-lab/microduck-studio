@@ -109,10 +109,18 @@ TCP `127.0.0.1:7801` 上的 MuJoCo 身体服务。请保持兄弟仓库的 `main
 启动器会将该提交展开到 Studio 的隔离状态目录，不会切换分支或修改工作区。
 如果需要可复现的运行时版本，可用 `MICRODUCK_SIM_REF` 指定 release tag。
 
-策略文件不再存放于 runtime 源码树。首次启动时，Studio 会执行选定 runtime 中的
-`scripts/seed-policies.sh`，将官方策略集保存到 `.studio-runtime/dev-stack/policies`；
-后续启动会直接复用。升级已有 Studio 工作区时，如果 Hub 临时不可用，启动器会导入旧布局中
-已缓存的策略集；这不会改变实际构建的 runtime 源码。
+策略文件不再存放于 runtime 源码树。Studio 从选定 runtime 的 `Cargo.toml` 读取策略仓库和
+版本，再调用它自己的 `scripts/seed-policies.sh`。每个版本独立缓存到
+`.studio-runtime/dev-stack/policies/<owner--repo>/<version>`，完整缓存可在之后离线复用。
+启动前必须具备 manifest 及其中列出的所有 ONNX 文件。旧版导入缓存会继续保留在磁盘上，
+不会被当作新运行时所需策略集而静默复用。
+
+当前集成面向 `microduck` **0.17.8**（IPC API **44**）以及 2026 年 10 月 12 日的
+`microduck_rl` `develop`，同时保留 Fork 的可视化服务。运行时声明的官方策略集为
+`pollen-robotics/microduck-policies@v8`。策略槽位、增益和技能时序由 `robotd` 与策略集 manifest
+决定；默认行走/站立使用 `velstand.onnx`。
+运行时镜像也会包含上游的抱起检测模型，并将选定的 Git revision 编译进二进制，使 `hello`
+报告实际运行的源码版本。
 
 ### 3. 准备 RL 环境
 
@@ -152,6 +160,11 @@ contract probe passed: runtime source, policies, subscription, movement ... m, s
 
 运动控制始终使用一个持久 `robotd` 连接。松开控件、隐藏页面、连接断开或 Studio 关闭时
 都会发送 `robot.stop`；`robotd` 始终是最终安全和电机控制权威。
+
+robotd 卡片会同时显示实际运行的 daemon 版本、API 和构建源码版本。API 不同会提示版本差异，
+具体调用仍以运行时响应为准。界面会显示运行时拒绝原因；监控断连时会关闭 WebSocket，让浏览器
+自动重连。监视器会显示上报的关节速度与电流，缺失值显示 `—`，不会假装为零；被抱起的机器人
+会明确标记为已暂停。
 
 ## 日常使用
 
@@ -426,6 +439,7 @@ uv sync --extra dev
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
+node --test tests/test_frontend.mjs
 ```
 
 ## 安全

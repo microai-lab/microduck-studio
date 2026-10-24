@@ -1,4 +1,7 @@
+import asyncio
+import threading
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,6 +9,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from microduck_studio.app import RenderCommand, create_app, render_profile
 from microduck_studio.config import Settings
+from microduck_studio.protocol import ROBOTD_API_VERSION, ProtocolError, RpcError
 
 
 def settings(tmp_path: Path) -> Settings:
@@ -43,7 +47,9 @@ def test_index_is_served(tmp_path):
         assert 'data-placeholder-zh="任务 ID"' in response.text
         assert 'data-placeholder-en="TASK_ID"' in response.text
         assert "loop rate" in response.text
-        assert "degrees · bar reaches ±11.5°" in response.text
+        assert "±11.5°" in response.text
+        assert "rad/s" in response.text
+        assert ">mA</span>" in response.text
         assert 'data-service="robotd"' in response.text
         assert 'data-service="mujoco"' in response.text
         assert 'data-service="tofd"' in response.text
@@ -98,6 +104,144 @@ def test_status_reports_the_runtime_source_that_was_actually_built(tmp_path):
             "ref": "main",
             "revision": "213a5ce90ec5f2605b6e6977b75672d9d2eea8c5",
         }
+
+
+@pytest.mark.parametrize("api_version", [ROBOTD_API_VERSION, ROBOTD_API_VERSION - 1])
+def test_status_reports_running_daemon_and_version_skew(tmp_path, api_version):
+    app = create_app(settings(tmp_path))
+    hello = {"api_version": api_version, "daemon_version": "0.17.8", "revision": "running-revision"}
+    health = {
+        "healthy": False,
+        "degraded": True,
+        "reason": "no servo power",
+        "bus": {"missing": [32, 33]},
+        "imu": {"missing": True},
+        "cpu_throttle": {"max_khz": 1800000, "current_khz": 408000},
+    }
+    app.state.robot.hello = AsyncMock(return_value=hello)
+    app.state.robot.request = AsyncMock(return_value=health)
+    with TestClient(app) as client:
+        robotd = client.get("/api/status").json()["robotd"]
+        assert robotd["connected"] is True
+        assert robotd["health"] == health
+        assert robotd["hello"] == hello
+        assert robotd["protocol"] == {
+            "client_api_version": ROBOTD_API_VERSION,
+            "matches": api_version == ROBOTD_API_VERSION,
+        }
+        app.state.robot.request.assert_awaited_once_with("robot.health", {})
+
+
+def test_status_does_not_report_malformed_health_as_connected(tmp_path):
+    app = create_app(settings(tmp_path))
+    app.state.robot.hello = AsyncMock(return_value={"api_version": ROBOTD_API_VERSION})
+    app.state.robot.request = AsyncMock(return_value={"healthy": "yes"})
+    with TestClient(app) as client:
+        robotd = client.get("/api/status").json()["robotd"]
+        assert robotd["connected"] is False
+        assert "health result" in robotd["error"]
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        {"accepted": False, "reason": "the policy is not driving"},
+        RpcError(
+            {"code": -32601, "message": "robot.do is unavailable", "data": {"api_version": 43}}
+        ),
+    ],
+)
+def test_control_reports_daemon_refusals_as_conflicts(tmp_path, refusal):
+    app = create_app(settings(tmp_path))
+    if isinstance(refusal, RpcError):
+        app.state.robot.request = AsyncMock(side_effect=refusal)
+        detail = refusal.error
+    else:
+        app.state.robot.request = AsyncMock(return_value=refusal)
+        detail = refusal
+    with TestClient(app) as client:
+        response = client.post("/api/control/skill", json={"skill": "jump"})
+        assert response.status_code == 409
+        assert response.json()["detail"] == detail
+        app.state.robot.request.assert_awaited_once_with("robot.do", {"skill": "jump"})
+
+
+@pytest.mark.parametrize(
+    "failure", [ProtocolError("malformed response"), ConnectionError("offline")]
+)
+def test_control_reports_protocol_and_connection_failures_as_unavailable(tmp_path, failure):
+    app = create_app(settings(tmp_path))
+    app.state.robot.request = AsyncMock(side_effect=failure)
+    with TestClient(app) as client:
+        response = client.post("/api/control/stop")
+        assert response.status_code == 503
+        assert response.json()["detail"] == str(failure)
+
+
+def test_control_uses_notifications_for_move_and_requests_for_stop(tmp_path):
+    app = create_app(settings(tmp_path))
+    app.state.robot.notify = AsyncMock()
+    app.state.robot.request = AsyncMock(return_value={"accepted": True})
+    with TestClient(app) as client:
+        assert client.post("/api/control/move", json={"vx": 0.2}).status_code == 200
+        app.state.robot.notify.assert_awaited_once_with(
+            "robot.move", {"vx": 0.2, "vy": 0.0, "vyaw": 0.0}
+        )
+        app.state.robot.request.assert_not_awaited()
+        assert client.post("/api/control/stop").json() == {"accepted": True}
+        app.state.robot.request.assert_awaited_once_with("robot.stop", None)
+    # Shutdown also waits for an explicit stop response before closing the control socket.
+    assert app.state.robot.request.await_args_list[-1].args == ("robot.stop",)
+
+
+@pytest.mark.parametrize("skill", ["", "../jump", "jump now", "jump\n", "a" * 129])
+def test_skill_names_are_validated_before_reaching_robotd(tmp_path, skill):
+    app = create_app(settings(tmp_path))
+    app.state.robot.request = AsyncMock(return_value={"accepted": True})
+    with TestClient(app) as client:
+        assert client.post("/api/control/skill", json={"skill": skill}).status_code == 422
+        app.state.robot.request.assert_not_awaited()
+
+
+def test_monitor_websocket_closes_after_source_error(tmp_path):
+    with TestClient(create_app(settings(tmp_path))) as client:
+        with client.websocket_connect("/ws/monitor") as websocket:
+            assert websocket.receive_json()["type"] == "error"
+            with pytest.raises(WebSocketDisconnect):
+                websocket.receive_json()
+
+
+@pytest.mark.parametrize("route", ["/ws/monitor", "/ws/sensors"])
+def test_idle_upstream_streams_close_when_browser_disconnects(tmp_path, monkeypatch, route):
+    closed = {
+        name: threading.Event() for name in ("robot.subscribe", "tof.stream", "head_imu.stream")
+    }
+
+    async def monitor_messages(self, hz=10):
+        del self, hz
+        try:
+            yield {"type": "subscribed", "data": {"accepted": True}}
+            await asyncio.Event().wait()
+        finally:
+            closed["robot.subscribe"].set()
+
+    async def sensor_messages(self):
+        try:
+            yield {"type": "sensor-subscribed", "data": {"accepted": True}}
+            await asyncio.Event().wait()
+        finally:
+            closed[self.method].set()
+
+    monkeypatch.setattr("microduck_studio.app.RobotdMonitor.messages", monitor_messages)
+    monkeypatch.setattr("microduck_studio.app.SensorMonitor.messages", sensor_messages)
+    expected = ("tof.stream", "head_imu.stream") if route == "/ws/sensors" else ("robot.subscribe",)
+    with TestClient(create_app(settings(tmp_path))) as client:
+        with client.websocket_connect(route) as websocket:
+            websocket.receive_json()
+            if route == "/ws/sensors":
+                websocket.receive_json()
+            websocket.close()
+            assert all(closed[name].wait(1) for name in expected)
 
 
 def test_service_actions_require_the_host_manager(tmp_path):

@@ -9,8 +9,14 @@ RUN apt-get update \
 
 WORKDIR /workspace
 COPY --from=microduck_source . .
+ARG DUCK_REVISION=unknown
+ENV DUCK_REVISION=${DUCK_REVISION}
 RUN cargo build --locked -p robotd -p robotctl \
     && cargo build --locked -p tof --bin tofd
+RUN mkdir -p /runtime-models \
+    && if [ -f duck-control/models/pickup_detector.onnx ]; then \
+        cp duck-control/models/pickup_detector.onnx /runtime-models/; \
+    fi
 
 FROM python:3.13-slim
 
@@ -23,6 +29,7 @@ RUN apt-get update \
 COPY --from=build /workspace/target/debug/robotd /usr/local/bin/robotd
 COPY --from=build /workspace/target/debug/robotctl /usr/local/bin/robotctl
 COPY --from=build /workspace/target/debug/tofd /usr/local/bin/tofd
+COPY --from=build /runtime-models/ /opt/robot/daemon/current/models/
 COPY docker/microduck/entrypoint.sh /usr/local/bin/microduck-entrypoint
 COPY docker/microduck/verify_contract.py /usr/local/lib/microduck-studio/verify-contract.py
 RUN chmod +x /usr/local/bin/microduck-entrypoint

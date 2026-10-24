@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +16,7 @@ from .config import Settings
 from .discovery import model_catalog, repo_status, scene_catalog, selected_scene
 from .jobs import JobManager
 from .protocol import (
+    ROBOTD_API_VERSION,
     BodyCameraClient,
     BodyClient,
     BodyFrameClient,
@@ -23,6 +24,7 @@ from .protocol import (
     ProtocolError,
     RobotdClient,
     RobotdMonitor,
+    RpcError,
     SensorMonitor,
 )
 from .services import ServiceController, ServiceManagerUnavailable
@@ -39,7 +41,7 @@ class Enable(BaseModel):
 
 
 class SkillRequest(BaseModel):
-    skill: Literal["ground_pick", "kick_left", "kick_right", "sit_toggle", "roulade"]
+    skill: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
 
 class SmokeRequest(BaseModel):
@@ -128,9 +130,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if notify:
                 await robot.notify(method, params)
                 return {"accepted": True}
-            return await robot.request(method, params)
+            result = await robot.request(method, params)
+            if not isinstance(result, dict) or type(result.get("accepted")) is not bool:
+                raise ProtocolError("invalid robotd intent result")
+            if result["accepted"] is False:
+                raise HTTPException(409, result)
+            return result
+        except RpcError as error:
+            raise HTTPException(409, error.error) from error
         except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
             raise HTTPException(503, str(error)) from error
+
+    async def wait_for_disconnect(websocket: WebSocket) -> None:
+        while (await websocket.receive())["type"] != "websocket.disconnect":
+            pass
+
+    async def stream_until_disconnect(websocket: WebSocket, send) -> None:
+        tasks = {
+            asyncio.create_task(send),
+            asyncio.create_task(wait_for_disconnect(websocket)),
+        }
+        try:
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     @app.get("/api/status")
     async def status():
@@ -147,11 +174,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
             simulator = {"connected": False, "error": str(error)}
+        hello = None
         try:
+            hello = await robot.hello()
             robot_health = await robot.request("robot.health", {})
+            if not isinstance(robot_health, dict) or type(robot_health.get("healthy")) is not bool:
+                raise ProtocolError("invalid robotd health result")
             robotd = {"connected": True, "health": robot_health}
         except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
             robotd = {"connected": False, "error": str(error)}
+        robotd["hello"] = hello
+        robotd["protocol"] = {
+            "client_api_version": ROBOTD_API_VERSION,
+            "matches": hello["api_version"] == ROBOTD_API_VERSION if hello else None,
+        }
         robotd["source"] = {
             "ref": settings.runtime_ref,
             "revision": settings.runtime_revision,
@@ -226,14 +262,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def monitor(websocket: WebSocket):
         await websocket.accept()
         stream = RobotdMonitor(settings.robotd_socket)
+
+        async def send_monitor() -> None:
+            async with aclosing(stream.messages(hz=10)) as messages:
+                async for message in messages:
+                    await websocket.send_json(message)
+
         try:
-            async for message in stream.messages(hz=10):
-                await websocket.send_json(message)
+            await stream_until_disconnect(websocket, send_monitor())
+            await websocket.close()
         except WebSocketDisconnect:
             pass
         except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
             try:
                 await websocket.send_json({"type": "error", "message": str(error)})
+                await websocket.close()
             except (RuntimeError, WebSocketDisconnect):
                 pass
 
@@ -244,19 +287,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         async def forward(method: str) -> None:
             try:
-                async for message in SensorMonitor(settings.tofd_socket, method).messages():
-                    if queue.full():
-                        queue.get_nowait()
-                        queue.task_done()
-                    await queue.put(message)
+                async with aclosing(
+                    SensorMonitor(settings.tofd_socket, method).messages()
+                ) as messages:
+                    async for message in messages:
+                        if queue.full():
+                            queue.get_nowait()
+                            queue.task_done()
+                        await queue.put(message)
             except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:
                 await queue.put({"type": "sensor-error", "message": str(error)})
 
-        tasks = {
-            asyncio.create_task(forward("tof.stream")),
-            asyncio.create_task(forward("head_imu.stream")),
-        }
-        try:
+        async def send_sensors() -> None:
             while True:
                 message = await queue.get()
                 await websocket.send_json(message)
@@ -264,6 +306,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if message.get("type") == "sensor-error":
                     await websocket.close()
                     break
+
+        tasks = {
+            asyncio.create_task(forward("tof.stream")),
+            asyncio.create_task(forward("head_imu.stream")),
+        }
+        try:
+            await stream_until_disconnect(websocket, send_sensors())
         except WebSocketDisconnect:
             pass
         except (OSError, ConnectionError, TimeoutError, ProtocolError) as error:

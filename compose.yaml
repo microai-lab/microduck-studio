@@ -10,6 +10,7 @@ x-microduck-image: &microduck-image
     args:
       RUST_IMAGE: ${MICRODUCK_RUST_IMAGE:-rust:1.89-bookworm}
       ORT_VERSION: ${MICRODUCK_ORT_VERSION:-1.28.0}
+      DUCK_REVISION: ${MICRODUCK_RUNTIME_REVISION:-unknown}
 
 services:
   robotd:
@@ -28,7 +29,7 @@ services:
     volumes:
       - runtime:/runtime
       - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/robotd.toml:/config/robotd.toml:ro
-      - ${MICRODUCK_RUNTIME_DIR:-./.studio-runtime/dev-stack}/policies:/opt/robot/policies:ro
+      - ${MICRODUCK_POLICY_ROOT:-./.studio-runtime/dev-stack/policies}:/opt/robot/policies:ro
     healthcheck:
       test: ["CMD-SHELL", "test -S /runtime/robotd.sock"]
       interval: 1s

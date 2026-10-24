@@ -44,15 +44,19 @@ body.lang-en .switch-to-en { display: none; }
 body.lang-en .switch-to-zh { display: inline; }
 .ok { color: var(--green) !important; }
 .bad { color: var(--red) !important; }
+.warning { color: var(--accent) !important; }
 .muted, .hint { color: var(--muted); }
 
 .status-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 24px 0 14px; }
 .status-grid article, .panel, .monitor-panel { border: 1px solid var(--line); background: var(--panel); }
 .status-grid article { grid-column: span 3; min-width: 0; padding: 13px 14px; border-radius: 14px; }
-.status-grid .runtime-service-card { grid-column: span 2; }
+.status-grid .runtime-service-card { grid-column: span 3; }
+.status-grid .robotd-service-card { grid-column: 1 / -1; }
 .status-grid .service-card { position: relative; padding-right: 82px; }
 .status-grid article > span, .status-grid article > small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-grid strong { display: block; margin: 4px 0; font-size: 1rem; }
+.status-grid #robotd-detail { overflow: visible; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+#robotd-detail > span { display: block; }
 .service-action {
   position: absolute; top: 12px; right: 10px; min-height: 0; padding: 6px 9px; border-radius: 9px;
   color: #dce6f2; background: #1b293a; font-size: .72rem; line-height: 1.05;
@@ -64,6 +68,8 @@ body.lang-en .switch-to-zh { display: inline; }
 .panel { margin-top: 14px; padding: 18px; border-radius: 18px; }
 .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 17px 0; }
 .actions button { padding: 7px; }
+.actions button:disabled { cursor: not-allowed; opacity: .42; }
+.actions button:disabled:active { transform: none; background: #1a2535; color: var(--text); }
 .pad { width: min(380px, 100%); margin: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 button, input { font: inherit; border: 1px solid var(--line); border-radius: 12px; background: #1a2535; color: var(--text); }
 button { min-height: 52px; cursor: pointer; touch-action: none; user-select: none; font-weight: 750; }
@@ -174,12 +180,13 @@ button:active, button.active { transform: scale(.97); background: var(--accent);
 #head-imu-stream-status.ok, #tof-stream-status.ok { color: var(--green); }
 #head-imu-stream-status.bad, #tof-stream-status.bad { color: #ff5358; }
 #head-imu-stream-status, #tof-stream-status { max-width: 62%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.joints-block { min-height: 0; padding: 25px 8px 7px; overflow: hidden; }
+.joints-block { min-height: 0; padding: 25px 8px 7px; overflow-x: auto; }
 .joints-block .terminal-legend { top: 8px; }
-.joint-grid { display: grid; grid-template-columns: minmax(104px, 1.15fr) 70px 76px 68px minmax(115px, 1.35fr); gap: 6px; align-items: center; }
-.joint-grid-head { padding: 0 5px 3px; color: #758397; font-weight: 700; }
+.joint-table { min-width: 700px; height: 100%; overflow-y: auto; scrollbar-width: thin; }
+.joint-grid { display: grid; grid-template-columns: minmax(115px, 1.3fr) 70px 76px 68px 65px 60px minmax(85px, 1fr); gap: 6px; align-items: center; }
+.joint-grid-head { position: sticky; top: 0; z-index: 1; padding: 0 5px 3px; color: #758397; background: #0b1119; font-weight: 700; }
 .joint-grid-head span:not(:first-child), .joint-value { text-align: right; }
-.joint-rows { height: 100%; overflow-y: auto; scrollbar-width: thin; }
+.joint-rows { height: auto; }
 .joint-rows > p { padding: 14px 5px; }
 .joint-row { min-height: 22px; padding: 1px 5px; }
 .joint-row:hover { background: #172131; }
@@ -259,12 +266,14 @@ button:active, button.active { transform: scale(.97); background: var(--accent);
   .sidebar, .simulator-panel, .monitor-panel { padding-left: 14px; padding-right: 14px; }
   .status-grid { grid-template-columns: 1fr 1fr; }
   .status-grid article, .status-grid .runtime-service-card { grid-column: auto; }
+  .status-grid .robotd-service-card { grid-column: 1 / -1; }
   .actions { grid-template-columns: 1fr 1fr; }
   .stage { grid-template-rows: minmax(300px, 52vh) auto; }
   .monitor-panel { min-height: 1900px; }
   .robotd-monitor { min-width: 0; }
+  .robot-status-block { padding-top: 50px; }
+  .robot-status-grid { grid-template-columns: 1fr; gap: 8px; }
   .joints-block { overflow-x: auto; }
-  .joint-grid { min-width: 475px; }
   .stage-title, .sim-heading-row, .sim-toolbar { align-items: flex-start; flex-direction: column; gap: 6px; }
   .sensor-observability, .robotd-monitor-side { grid-template-columns: 1fr; }
   .robotd-monitor-side { grid-template-rows: 300px 280px 190px; }

@@ -295,26 +295,11 @@ os.replace(temporary, path)
 }
 
 ensure_policies() {
-    policy_root="$RUNTIME_DIR/policies"
-    if [ ! -f "$policy_root/current/alpha_stand.onnx" ]; then
-        [ -f "$SIM_SOURCE/scripts/seed-policies.sh" ] ||
-            die "$SIM_REF has no scripts/seed-policies.sh; use a current microduck main or release tag"
-        say "no policy set here — fetching the official one"
-        sh "$SIM_SOURCE/scripts/seed-policies.sh" "$policy_root" || true
-    fi
-    if [ ! -f "$policy_root/current/alpha_stand.onnx" ]; then
-        for legacy in "$MICRODUCK_REPO/policies" "$RUNTIME_DIR"/sim-source-*/policies; do
-            [ -f "$legacy/alpha_stand.onnx" ] || continue
-            say "official policy fetch unavailable — importing cached set from $legacy"
-            imported="$policy_root/releases/imported-studio"
-            mkdir -p "$imported"
-            cp "$legacy"/*.onnx "$imported/"
-            ln -sfn releases/imported-studio "$policy_root/current"
-            break
-        done
-    fi
-    [ -f "$policy_root/current/alpha_stand.onnx" ] ||
-        die "no policy set in $policy_root; network access is needed once"
+    MICRODUCK_POLICY_ROOT=$(python3 "$SCRIPT_DIR/prepare-policies.py" \
+        --runtime-source "$SIM_SOURCE" --cache "$RUNTIME_DIR/policies") ||
+        die "runtime policy set is unavailable; see policy preparation diagnostics above"
+    export MICRODUCK_POLICY_ROOT
+    say "runtime policy cache: $MICRODUCK_POLICY_ROOT"
 }
 
 write_robotd_params() {
@@ -323,13 +308,8 @@ write_robotd_params() {
     cat >"$PARAMS_FILE" <<'EOF'
 [policy]
 enabled = true
-walk = "/opt/robot/policies/current/alpha_walking.onnx"
-stand = "/opt/robot/policies/current/alpha_stand.onnx"
-sitstand = "/opt/robot/policies/current/alpha_sitstand.onnx"
-ground_pick = "/opt/robot/policies/current/alpha_ground_pick.onnx"
-kick_left = "/opt/robot/policies/current/ball_kick_left.onnx"
-kick_right = "/opt/robot/policies/current/ball_kick_right.onnx"
-roulade = "/opt/robot/policies/current/roulade.onnx"
+# Slot paths and timing come from robotd and the installed set's manifest.
+# Current walking mode uses velstand for both locomotion and standing.
 
 [audio]
 device = "default"

@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import socket
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -184,18 +185,20 @@ def verify(args: argparse.Namespace) -> float:
         raise RuntimeError(f"selected scene is absent from the RL catalog: {scenes}")
     verify_head_camera(args.head_camera_host, args.head_camera_port)
 
-    required = (
-        "alpha_walking.onnx",
-        "alpha_stand.onnx",
-        "alpha_sitstand.onnx",
-        "alpha_ground_pick.onnx",
-        "ball_kick_left.onnx",
-        "ball_kick_right.onnx",
-        "roulade.onnx",
-    )
+    manifest = json.loads((args.policy_dir / "manifest.json").read_text())
+    required = [entry["file"] for entry in manifest["policies"]]
+    if not required:
+        raise RuntimeError("policy manifest lists no policies")
     missing = [name for name in required if not (args.policy_dir / name).is_file()]
     if missing:
         raise RuntimeError(f"policy mount is incomplete: {', '.join(missing)}")
+    if not robotd.get("hello", {}).get("daemon_version"):
+        raise RuntimeError("running robotd did not report its version")
+    if robotd.get("protocol", {}).get("matches") is False:
+        print(
+            f"Studio/runtime API versions differ; checking live contracts: {robotd['protocol']}",
+            file=sys.stderr,
+        )
 
     state = monitor_state(args.robot_socket)
     if "move" not in state or "policy" not in state:
