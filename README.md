@@ -129,6 +129,18 @@ timing to `robotd` and that set's manifest; the default walking/standing gait is
 The runtime image also includes the upstream pickup detector model, and embeds the selected Git
 revision into the binaries so `hello` reports the source that actually ran.
 
+This revision also requires the RL fork's `--actuator-model` support from commit
+`eb76427376d5105954f53614be8f838f8298b5d5` or a later compatible revision. The launcher passes
+this argument for both the default XML path and the optional BAM path.
+
+Studio's generated simulation configuration uses `[control] cmd_alpha = 1.0` to pass velocity
+commands through without the runtime's default `0.2` smoothing. In repeated v8 tests, smoothing
+could leave a stopped duck standing when commanded to move sideways; pass-through improved
+lateral step initiation in several trials, but did not establish reliable sideways motion.
+This override applies to the development stack's `robotd --sim` only.
+The policy can still drift forward and turn during a lateral command; successful delivery of
+`vy` does not guarantee precise sideways motion.
+
 ### 3. Prepare the RL environment
 
 The native macOS Viewer runs from the `microduck_rl` virtual environment:
@@ -168,6 +180,16 @@ contract probe passed: runtime source, policies, subscription, movement ... m, s
 
 Motion uses one persistent `robotd` connection. Releasing a control, hiding the page, disconnecting,
 or shutting Studio down sends `robot.stop`; `robotd` remains the final safety and motor authority.
+The browser serializes movement and stop HTTP requests, keeps only the latest queued direction,
+and preserves a stop before a new press. A stop waits for any in-flight request to finish,
+preserving successful request order; network latency and robotd's deadman still apply.
+
+The left button sends `[vx=0, vy=0.6, vyaw=0]` to help the official v8 policy start in
+the default XML simulation; right stays at `vy=-0.3`. This exceeds the checkpoint's
+trained lateral command range of ±0.3 and is a simulation demo workaround. It does
+not change model weights or add heading compensation, and does not establish
+accurate lateral speed or a straight trajectory. Releasing the button still sends
+the same explicit stop.
 
 The robotd card reports the running daemon version and API alongside the built source revision.
 A different API is shown as a version difference; individual RPC responses remain authoritative.
@@ -184,6 +206,7 @@ Run these commands from `microduck-studio`:
 | Start or cleanly restart everything and verify control | `./scripts/dev-stack.sh` |
 | Run native MuJoCo in the background (default) | `./scripts/dev-stack.sh` |
 | Start with a specific RL scene | `./scripts/dev-stack.sh --scene scene_vslam.xml` |
+| Explicitly select the v8 BAM/backlash physics | `./scripts/dev-stack.sh --actuator-model bam --scene scene_velstand.xml` |
 | Explicitly open the desktop MuJoCo Viewer | `./scripts/dev-stack.sh --viewer` |
 | Start without the simulated movement probe | `./scripts/dev-stack.sh --skip-control-probe` |
 | Stop background MuJoCo 10 s after the last page closes | `./scripts/dev-stack.sh --stop-on-browser-close` |
@@ -211,6 +234,19 @@ shutdown. Without this option, background MuJoCo continues until `dev-stack.sh s
 remains available as an explicit compatibility spelling of the default behavior.
 
 ### Choose a rendering mode
+
+Actuator physics is independent of the rendering backend. The default remains `xml`; use
+`--actuator-model bam --scene scene_velstand.xml` for the training-aligned v8 robot, in either
+`native` or `docker` mode. `MICRODUCK_ACTUATOR_MODEL` can override the default; an explicit CLI
+argument wins. The launcher keeps the selected scene unchanged: BAM with a legacy scene changes
+its actuators but does not supply the missing backlash geometry. This optional physics path is
+not a claim that the current policy passes stable lateral-walking acceptance.
+
+Native BAM uses the locked `microduck_rl` virtual environment. The Docker renderer installs the
+exact MuJoCo, NumPy, and Pillow versions recorded in that repository's `uv.lock`, so rebuilding
+does not silently upgrade the physics engine. It also installs the official locked BAM revision
+using `--no-deps`, plus colorama; it does not install Torch, mjlab, or training extras. GPU
+selection continues to use the separate `--gpu` rendering option.
 
 Use the default command for a local macOS development machine. It is the only mode intended for a
 smooth local demo without a Linux GPU host:

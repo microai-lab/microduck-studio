@@ -32,7 +32,9 @@ from .services import ServiceController, ServiceManagerUnavailable
 
 class Move(BaseModel):
     vx: float = Field(0, ge=-0.4, le=0.4)
-    vy: float = Field(0, ge=-0.3, le=0.3)
+    # Positive y is left. A stronger input helps the released v8 policy start
+    # in Studio's XML simulation; preserve the existing rightward limit.
+    vy: float = Field(0, ge=-0.3, le=0.6)
     vyaw: float = Field(0, ge=-1.5, le=1.5)
 
 

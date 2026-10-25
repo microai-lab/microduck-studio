@@ -1,5 +1,9 @@
 const $ = selector => document.querySelector(selector);
 let moveTimer = null;
+let activeMove = null;
+let motionRequest = null;
+let queuedMovement = null;
+let queuedStop = null;
 let monitorSocket = null;
 let monitorRetry = null;
 let sensorSocket = null;
@@ -359,6 +363,7 @@ function renderPath(position, yaw) {
 
 function renderMonitor(state) {
   latestRobotPolicy = state.policy || null;
+  if (latestRobotPolicy === 'held' && activeMove) rejectHeldMove();
   $('#monitor-policy').textContent = state.policy || '—';
   $('#monitor-time').textContent = Number(state.t || 0).toFixed(2);
   const loop = state.loop || {};
@@ -902,26 +907,96 @@ simulatorViewport.addEventListener('dblclick', event => {
   sendSimulatorCamera('reset');
 });
 
-async function stop() {
+function clearMove() {
+  const previous = activeMove;
+  // Retire the owner before releasing capture: lostpointercapture can run immediately.
+  activeMove = null;
+  queuedMovement = null;
   clearInterval(moveTimer);
   moveTimer = null;
   document.querySelectorAll('[data-vx].active,[data-vy].active,[data-vyaw].active')
     .forEach(node => node.classList.remove('active'));
-  try {
-    acceptedResult(await api('/api/control/stop', {method: 'POST'}));
-    controlMessage('已停止', 'Stopped');
-  } catch (error) {
-    controlMessage(error.message, error.message, true);
+  if (previous?.button.hasPointerCapture(previous.pointerId)) {
+    previous.button.releasePointerCapture(previous.pointerId);
   }
 }
 
-async function sendMove(button) {
-  if (latestRobotPolicy === 'held') {
-    clearInterval(moveTimer);
-    moveTimer = null;
-    controlMessage('请先启用 RL / 站起', 'Enable RL / Stand up first', true);
+function rejectHeldMove() {
+  // An already dispatched move cannot be recalled. Drain it before an explicit
+  // stop, so enabling RL later cannot expose that old intent as the last command.
+  if (motionRequest?.kind === 'move') void queueStop(true);
+  else clearMove();
+  controlMessage('请先启用 RL / 站起', 'Enable RL / Stand up first', true);
+}
+
+function flushMotion() {
+  if (motionRequest) return;
+  if (queuedStop) {
+    const request = queuedStop;
+    queuedStop = null;
+    void sendStop(request);
     return;
   }
+  const movement = queuedMovement;
+  queuedMovement = null;
+  if (movement && activeMove === movement && latestRobotPolicy !== 'held') {
+    void sendMoveRequest(movement);
+  }
+}
+
+function stop() {
+  return queueStop();
+}
+
+function queueStop(quiet = false) {
+  clearMove();
+  // A stop is an ordering barrier. A fresh press may queue behind it, but
+  // cannot overwrite it or overtake a movement whose HTTP delivery is pending.
+  let request = motionRequest?.kind === 'stop' ? motionRequest : queuedStop;
+  if (!request) {
+    let resolve;
+    const done = new Promise(finish => { resolve = finish; });
+    request = {kind: 'stop', done, resolve};
+    queuedStop = request;
+  }
+  request.quiet = quiet;
+  flushMotion();
+  return request.done;
+}
+
+async function sendStop(request) {
+  motionRequest = request;
+  try {
+    acceptedResult(await api('/api/control/stop', {method: 'POST'}));
+    if (!request.quiet && !activeMove && latestRobotPolicy !== 'held') {
+      controlMessage('已停止', 'Stopped');
+    }
+  } catch (error) {
+    if (!request.quiet && !activeMove && latestRobotPolicy !== 'held') {
+      controlMessage(error.message, error.message, true);
+    }
+  } finally {
+    motionRequest = null;
+    request.resolve();
+    flushMotion();
+  }
+}
+
+function sendMove(movement) {
+  if (activeMove !== movement) return;
+  if (latestRobotPolicy === 'held') {
+    rejectHeldMove();
+    return;
+  }
+  // Keep at most the latest live pointer owner, rather than accumulating
+  // promises for every 100 ms tick while another request is pending.
+  queuedMovement = movement;
+  flushMotion();
+}
+
+async function sendMoveRequest(movement) {
+  motionRequest = {kind: 'move', movement};
+  const {button} = movement;
   const command = {
     vx: Number(button.dataset.vx || 0),
     vy: Number(button.dataset.vy || 0),
@@ -929,25 +1004,45 @@ async function sendMove(button) {
   };
   try {
     await api('/api/control/move', {method: 'POST', body: JSON.stringify(command)});
+    if (activeMove !== movement) return;
     const commandText = JSON.stringify(command);
     controlMessage(`移动 ${commandText}`, `Moving ${commandText}`);
   } catch (error) {
+    if (activeMove !== movement) return;
     controlMessage(error.message, error.message, true);
+  } finally {
+    motionRequest = null;
+    flushMotion();
   }
+}
+
+function releaseMove(event) {
+  if (!activeMove || activeMove.pointerId !== event.pointerId
+      || activeMove.button !== event.currentTarget) return;
+  return stop();
 }
 
 document.querySelectorAll('[data-vx],[data-vy],[data-vyaw]').forEach(button => {
   button.addEventListener('pointerdown', event => {
     event.preventDefault();
-    button.setPointerCapture(event.pointerId);
+    clearMove();
+    if (latestRobotPolicy === 'held') {
+      rejectHeldMove();
+      return;
+    }
+    const movement = {button, pointerId: event.pointerId};
+    activeMove = movement;
     button.classList.add('active');
-    sendMove(button);
-    clearInterval(moveTimer);
-    moveTimer = setInterval(() => sendMove(button), 100);
+    button.setPointerCapture(event.pointerId);
+    if (activeMove !== movement) return;
+    sendMove(movement);
+    if (activeMove === movement) {
+      moveTimer = setInterval(() => sendMove(movement), 100);
+    }
   });
-  button.addEventListener('pointerup', stop);
-  button.addEventListener('pointercancel', stop);
-  button.addEventListener('lostpointercapture', stop);
+  button.addEventListener('pointerup', releaseMove);
+  button.addEventListener('pointercancel', releaseMove);
+  button.addEventListener('lostpointercapture', releaseMove);
 });
 
 document.querySelectorAll('[data-action="stop"]').forEach(button =>

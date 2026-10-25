@@ -194,6 +194,50 @@ def test_control_uses_notifications_for_move_and_requests_for_stop(tmp_path):
     assert app.state.robot.request.await_args_list[-1].args == ("robot.stop",)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        {"vy": 0.6},
+        {"vy": -0.3},
+        {"vy": 0.0},
+        {"vx": 0.4, "vy": 0.3, "vyaw": 1.5},
+        {"vx": -0.4, "vy": -0.3, "vyaw": -1.5},
+    ],
+)
+def test_move_accepts_left_start_command_and_preserves_other_axis_limits(tmp_path, command):
+    app = create_app(settings(tmp_path))
+    app.state.robot.notify = AsyncMock()
+    app.state.robot.request = AsyncMock(return_value={"accepted": True})
+    with TestClient(app) as client:
+        assert client.post("/api/control/move", json=command).status_code == 200
+        app.state.robot.notify.assert_awaited_once_with(
+            "robot.move", {"vx": 0.0, "vy": 0.0, "vyaw": 0.0} | command
+        )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        {"vy": 0.60001},
+        {"vy": -0.30001},
+        {"vx": 0.40001},
+        {"vx": -0.40001},
+        {"vyaw": 1.50001},
+        {"vyaw": -1.50001},
+        {"vy": "NaN"},
+        {"vy": "Infinity"},
+        {"vy": "-Infinity"},
+    ],
+)
+def test_move_rejects_excessive_or_nonfinite_commands_before_robotd(tmp_path, command):
+    app = create_app(settings(tmp_path))
+    app.state.robot.notify = AsyncMock()
+    app.state.robot.request = AsyncMock(return_value={"accepted": True})
+    with TestClient(app) as client:
+        assert client.post("/api/control/move", json=command).status_code == 422
+        app.state.robot.notify.assert_not_awaited()
+
+
 @pytest.mark.parametrize("skill", ["", "../jump", "jump now", "jump\n", "a" * 129])
 def test_skill_names_are_validated_before_reaching_robotd(tmp_path, skill):
     app = create_app(settings(tmp_path))

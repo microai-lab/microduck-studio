@@ -130,6 +130,8 @@ services:
     command:
       - --keyframe
       - HOME
+      - --actuator-model
+      - ${MICRODUCK_ACTUATOR_MODEL:-xml}
       - --host
       - 0.0.0.0
       - --port

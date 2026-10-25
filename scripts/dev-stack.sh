@@ -15,6 +15,7 @@ BODY_PORT=${MICRODUCK_BODY_PORT:-7801}
 HEAD_CAMERA_PORT=${MICRODUCK_HEAD_CAMERA_PORT:-7901}
 STUDIO_PORT=${MICRODUCK_STUDIO_PORT:-8090}
 SCENE=${MICRODUCK_SCENE:-scene.xml}
+ACTUATOR_MODEL=${MICRODUCK_ACTUATOR_MODEL:-xml}
 # Rendering/isolation choices must remain visible in shell history. The no-argument default is the
 # authoritative native MuJoCo path; Docker and GPU passthrough are selected only with CLI flags.
 SIM_MODE=native
@@ -276,8 +277,10 @@ ensure_sim_source() {
     MICRODUCK_RENDER_HEIGHT=$RENDER_HEIGHT
     MICRODUCK_RENDER_FPS=$RENDER_FPS
     MICRODUCK_RENDER_QUALITY=$RENDER_QUALITY
+    MICRODUCK_ACTUATOR_MODEL=$ACTUATOR_MODEL
     export MICRODUCK_RENDER_WIDTH MICRODUCK_RENDER_HEIGHT MICRODUCK_RENDER_FPS
     export MICRODUCK_RENDER_QUALITY MICRODUCK_BODY_HOST MICRODUCK_MUJOCO_GL
+    export MICRODUCK_ACTUATOR_MODEL
 }
 
 write_simulator_config() {
@@ -306,10 +309,26 @@ write_robotd_params() {
     PARAMS_FILE="$RUNTIME_DIR/robotd.toml"
     export PARAMS_FILE
     cat >"$PARAMS_FILE" <<'EOF'
+[control]
+# Pass button velocity changes through in simulation. With v8 velstand, the default 0.2 EMA
+# can leave the gait standing after a lateral command instead of initiating a step.
+# Keep this override in Studio's --sim config; hardware retains robotd's own defaults.
+cmd_alpha = 1.0
+
 [policy]
 enabled = true
 # Slot paths and timing come from robotd and the installed set's manifest.
 # Current walking mode uses velstand for both locomotion and standing.
+EOF
+    if [ "$ACTUATOR_MODEL" = bam ]; then
+        cat >>"$PARAMS_FILE" <<'EOF'
+# The BAM/backlash profile mirrors the policy's training action contract.
+action_scale = 1.0
+legs_lowpass = 1.0
+head_lowpass = 1.0
+EOF
+    fi
+    cat >>"$PARAMS_FILE" <<'EOF'
 
 [audio]
 device = "default"
@@ -325,7 +344,7 @@ start_native_body() {
     python3 -c '
 import plistlib, sys
 
-path, label, python, runner, config, rl_root, mjpython, port, frame_port, width, height, fps, quality, headless, idle, log = sys.argv[1:]
+path, label, python, runner, config, rl_root, mjpython, port, frame_port, width, height, fps, quality, actuator_model, headless, idle, log = sys.argv[1:]
 arguments = [
     python,
     runner,
@@ -337,6 +356,8 @@ arguments = [
     mjpython,
     "--keyframe",
     "HOME",
+    "--actuator-model",
+    actuator_model,
     "--port",
     port,
     "--render",
@@ -374,6 +395,7 @@ with open(path, "wb") as output:
         "$MICRODUCK_RL_REPO/.venv/bin/mjpython" \
         "$BODY_PORT" "$HEAD_CAMERA_PORT" "$RENDER_WIDTH" "$RENDER_HEIGHT" \
         "$RENDER_FPS" "$RENDER_QUALITY" \
+        "$ACTUATOR_MODEL" \
         "$HEADLESS" "$([ "$STOP_ON_BROWSER_CLOSE" = true ] && printf 10 || printf 0)" \
         "$RUNTIME_DIR/mujoco.log"
     launchctl bootstrap "$DOMAIN" "$BODY_PLIST"
@@ -475,6 +497,11 @@ while [ "$#" -gt 0 ]; do
             GPU=$2
             shift 2
             ;;
+        --actuator-model)
+            [ "$#" -ge 2 ] || die "--actuator-model requires xml or bam"
+            ACTUATOR_MODEL=$2
+            shift 2
+            ;;
         --headless)
             HEADLESS=true
             shift
@@ -496,12 +523,13 @@ while [ "$#" -gt 0 ]; do
             SCENE=$2
             shift 2
             ;;
-        *) die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--scene scene*.xml] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]" ;;
+        *) die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--actuator-model xml|bam] [--scene scene*.xml] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]" ;;
     esac
 done
 
 case "$SIM_MODE" in native|docker) ;; *) die "--sim-mode requires native or docker" ;; esac
 case "$GPU" in none|dri|nvidia) ;; *) die "--gpu requires none, dri, or nvidia" ;; esac
+case "$ACTUATOR_MODEL" in xml|bam) ;; *) die "--actuator-model requires xml or bam" ;; esac
 [ "$SIM_MODE" = docker ] || [ "$GPU" = none ] || die "--gpu is only valid with --sim-mode docker"
 [ "$HEADLESS" = true ] || [ "$SIM_MODE" = native ] || die "--viewer is only valid with native mode"
 [ "$STOP_ON_BROWSER_CLOSE" = false ] || [ "$HEADLESS" = true ] || die "--stop-on-browser-close requires --headless"
@@ -520,7 +548,7 @@ case "$action" in
     start)
         ;;
     *)
-        die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--scene scene*.xml] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]"
+        die "usage: $0 [start|stop|status|monitor] [--sim-mode native|docker] [--gpu none|dri|nvidia] [--actuator-model xml|bam] [--scene scene*.xml] [--viewer|--headless] [--stop-on-browser-close] [--skip-control-probe]"
         ;;
 esac
 
@@ -542,7 +570,10 @@ case "$GPU" in
     dri|nvidia) MICRODUCK_MUJOCO_GL=egl ;;
 esac
 export MICRODUCK_BODY_HOST MICRODUCK_MUJOCO_GL
-say "mode: $SIM_MODE; GPU: $GPU; headless: $HEADLESS; render: ${RENDER_WIDTH}x${RENDER_HEIGHT} @ ${RENDER_FPS} FPS"
+say "mode: $SIM_MODE; GPU: $GPU; actuators: $ACTUATOR_MODEL; scene: $SCENE; headless: $HEADLESS; render: ${RENDER_WIDTH}x${RENDER_HEIGHT} @ ${RENDER_FPS} FPS"
+if [ "$action" = start ] && [ "$ACTUATOR_MODEL" = bam ] && [ "$SCENE" != scene_velstand.xml ]; then
+    say "BAM with $SCENE changes actuators only; select --scene scene_velstand.xml for the v8 matching robot geometry."
+fi
 docker info >/dev/null 2>&1 || die "Docker is not running or is not reachable"
 mkdir -p "$RUNTIME_DIR/jobs" "$SERVICE_MANAGER_DIR"
 ensure_sim_source
