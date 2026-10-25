@@ -33,138 +33,96 @@
   <a href="#页面无法控制机器人时">故障排查</a>
 </p>
 
-Microduck Studio 把现有的
-[`microduck`](https://github.com/pollen-robotics/microduck) 运行时和
-[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl) 仿真/训练项目连接成一套
-基于浏览器的开发流程。它负责呈现状态和安全控制，不会复制机器人安全、策略推理、仿真物理
-或训练逻辑。
+Microduck Studio 是 Microduck 的本地网页控制台，可在浏览器中操作仿真机器人、查看
+MuJoCo 实时画面与运行状态，并管理开发服务。
 
 ## 使用 AI Coding 工具启动
 
-任何能够访问项目文件和本地终端的 AI Coding 工具都可以启动完整链路，不需要专用集成。
-常用工具包括 [Codex](https://developers.openai.com/codex/)、
-[Claude Code](https://code.claude.com/docs/en/overview)、
-[Cursor Agent](https://cursor.com/docs/agent/overview) 和
-[GitHub Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-copilot-cli)。
-
-使用本地会话打开 `microduck-dev` 工作区，然后输入：
+使用能访问本机项目和终端的 AI Coding 工具打开 `microduck-dev` 工作区，然后输入：
 
 ```text
-帮我启动 Microduck Studio 的所有服务。先阅读 AGENTS.md 和 microduck-studio/README.zh-CN.md，
-检查三个同级仓库、Docker、uv，以及 7801 和 8090 端口；然后进入 microduck-studio 运行
-./scripts/dev-stack.sh。等待出现“contract probe passed”后，再报告 Studio 地址以及 Studio、
-robotd、tofd 和 MuJoCo 的状态。不要启动训练任务，也不要切换或修改兄弟仓库的工作分支。
+帮我启动 Microduck Studio 的所有服务。检查三个同级仓库、Docker、uv，以及 7801 和 8090
+端口；然后进入 microduck-studio 运行 ./scripts/dev-stack.sh。等待出现“contract probe passed”
+后，报告网页地址及各服务状态。不要启动训练任务，也不要切换兄弟仓库的分支。
 ```
-
-> 应使用能够访问 Docker 和桌面环境的本地 Agent 会话。云端或后台 Agent 可能运行在另一台
-> 机器上，无法在开发主机上显示原生 MuJoCo Viewer。
 
 ## 快速开始
 
 ### 环境要求
 
 - Docker（含 Docker Compose）
-- `git` 和 `curl`
-- Python 3 和 [`uv`](https://docs.astral.sh/uv/)
-
-> 各项目均可直接在宿主机运行，本身不强制依赖 Docker。`dev-stack.sh` 使用 Docker 隔离
-> `robotd` 与 Studio Web 的构建和运行环境，因此一键联合启动仍需 Docker。macOS 可以使用
-> Docker Desktop，也可以使用其他兼容的 Docker 运行环境。
+- `git`、`curl`、Python 3 和 [`uv`](https://docs.astral.sh/uv/)
+- macOS 使用默认 native 模式；Linux 使用 Docker 模式
 
 ### 1. 下载三个仓库
 
-Studio 不能脱离另外两个项目单独启动完整链路：`microduck` 提供 `robotd` 和策略，
-`microduck_rl` 提供 MuJoCo 身体与 Viewer。三个仓库必须位于同一个工作区的同级目录：
+三个仓库放在同一个工作区的同级目录：
 
 ```text
-microduck-dev/          # 仅作为工作区，不是 Git 仓库
-├── microduck/          # robotd、robotctl、策略和运行时协议
-├── microduck_rl/       # MuJoCo 身体、Viewer、环境和训练
-└── microduck-studio/   # Web 界面和开发链路编排
+microduck-dev/
+├── microduck/
+├── microduck_rl/
+└── microduck-studio/
 ```
-
-全新安装时，下载该开发工作区使用的三个仓库：
 
 ```bash
 mkdir -p ~/microduck-dev
 cd ~/microduck-dev
 
 git clone https://github.com/microai-lab/microduck.git
-git clone https://github.com/microai-lab/microduck_rl.git
+git clone --branch develop https://github.com/microai-lab/microduck_rl.git
 git clone https://github.com/microai-lab/microduck-studio.git
 ```
 
-下载地址：[microduck](https://github.com/microai-lab/microduck)、
-[microduck_rl](https://github.com/microai-lab/microduck_rl) 和
-[microduck-studio](https://github.com/microai-lab/microduck-studio)。前两个是
-[官方运行时仓库](https://github.com/pollen-robotics/microduck) 和
-[官方 RL 仓库](https://github.com/pollen-robotics/microduck_rl) 的开发分支仓库。
+已有仓库可以直接使用，请确认 `microduck` 的 `main` 和 RL Fork 的 `develop` 已更新。
+启动器不会自动切换兄弟仓库的工作分支。
 
-如果仓库已经存在，请不要重复克隆，只需确认目录结构符合上图。
+### 2. 准备仿真环境
 
-### 2. 准备仿真后端
-
-`microduck` 的常规 `main` 分支已经包含远程 `RobotIo` 实现，`robotd --sim` 默认连接
-TCP `127.0.0.1:7801` 上的 MuJoCo 身体服务。请保持兄弟仓库的 `main` 为最新状态；
-启动器会将该提交展开到 Studio 的隔离状态目录，不会切换分支或修改工作区。
-如果需要可复现的运行时版本，可用 `MICRODUCK_SIM_REF` 指定 release tag。
-
-策略文件不再存放于 runtime 源码树。Studio 从选定 runtime 的 `Cargo.toml` 读取策略仓库和
-版本，再调用它自己的 `scripts/seed-policies.sh`。每个版本独立缓存到
-`.studio-runtime/dev-stack/policies/<owner--repo>/<version>`，完整缓存可在之后离线复用。
-启动前必须具备 manifest 及其中列出的所有 ONNX 文件。旧版导入缓存会继续保留在磁盘上，
-不会被当作新运行时所需策略集而静默复用。
-
-当前集成面向 `microduck` **0.17.8**（IPC API **44**）以及 2026 年 10 月 12 日的
-`microduck_rl` `develop`，同时保留 Fork 的可视化服务。运行时声明的官方策略集为
-`pollen-robotics/microduck-policies@v8`。策略槽位、增益和技能时序由 `robotd` 与策略集 manifest
-决定；默认行走/站立使用 `velstand.onnx`。
-运行时镜像也会包含上游的抱起检测模型，并将选定的 Git revision 编译进二进制，使 `hello`
-报告实际运行的源码版本。
-
-### 3. 准备 RL 环境
-
-macOS 原生 Viewer 从 `microduck_rl` 的虚拟环境运行：
+macOS native 模式需要安装 RL 环境及网页渲染依赖：
 
 ```bash
 cd ~/microduck-dev/microduck_rl
-uv sync
+uv sync --extra visualization
 ```
 
-### 4. 启动并验证完整链路
+Docker 模式由镜像安装 MuJoCo 运行依赖，无需另建宿主机 RL 虚拟环境。
+首次启动会下载官方策略集，已有完整缓存时可以离线复用。当前使用官方 v8 `velstand` 策略。
+
+### 3. 启动服务
+
+macOS 默认在后台运行 MuJoCo，不弹出桌面 Viewer；`robotd`、`tofd` 与 Studio 运行在 Docker 中：
 
 ```bash
 cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
-打开 **http://127.0.0.1:8090**。默认 `native` 模式会在 macOS 后台启动 MuJoCo，以获得
-流畅的原生 OpenGL 离屏渲染，但不会弹出桌面 Viewer；支持仿真的 `robotd` 与 Studio 在
-Docker 中运行。启动器最后会在真实运行栈上验证 runtime revision、策略挂载、robot/ToF/
-head-IMU 订阅、运动、显式停止和断连自动停止。仅能打开网页不代表已经就绪；请等待：
+Linux 或需要全 Docker 环境时使用：
 
-```text
-contract probe passed: runtime source, policies, subscription, movement ... m, stop, disconnect
+```bash
+./scripts/dev-stack.sh --sim-mode docker --gpu none
 ```
 
-> 启动器不会切换兄弟仓库的工作分支。它会把选定的 runtime 提交展开到
-> 隔离的本地状态目录，并在界面中报告实际的 ref 和 commit。
+出现 `contract probe passed` 后，打开 **http://127.0.0.1:8090**。
+启动器会检查各服务及仿真控制链路；只看到网页并不代表机器人控制已经就绪。
 
 ## 主要能力
 
-| 能力 | 内容 |
+| 功能 | 可以做什么 |
 |---|---|
-| Web 控制 | 适合手机操作的移动、启用/停止、坐下/站起、前滚翻和踢球 |
-| 实时可见性 | 可切换的 MuJoCo 场景、世界/头部相机视角、同步 IMU/ToF/传感器位姿遥测、仓库/任务状态及模型发现 |
-| 安全编排 | Docker Compose 生命周期、跨仓库契约探测和白名单 RL 冒烟测试 |
+| 机器人控制 | 前进、后退、左右移动和转向，启用/停止 RL，执行坐下、站起、前滚翻和踢球。 |
+| MuJoCo 实时画面 | 在浏览器查看仿真场景，在世界视角与机器人头部第一视角之间切换。 |
+| 相机操作 | 拖动旋转、滚轮或触控板缩放、双击恢复默认视角。 |
+| 画质选择 | 切换流畅、清晰和无损档位，最高请求 1920×1080 画面，显示实际 FPS。 |
+| 场景切换 | 从当前 RL 仓库中选择场景并应用，自动重启仿真与机器人服务。 |
+| 实时监视器 | 查看策略、控制指令、关节状态、IMU、8×8 ToF、里程计、安全状态与控制循环频率。 |
+| 服务管理 | 查看连接状态，在网页启动或重启 MuJoCo 和 `robotd`。 |
+| 中英文切换 | 页面可切换简体中文与英文。 |
+| 多种运行方式 | macOS 原生后台渲染、全 Docker CPU 渲染，以及 Linux GPU 启动选项。 |
 
-运动控制始终使用一个持久 `robotd` 连接。松开控件、隐藏页面、连接断开或 Studio 关闭时
-都会发送 `robot.stop`；`robotd` 始终是最终安全和电机控制权威。
-
-robotd 卡片会同时显示实际运行的 daemon 版本、API 和构建源码版本。API 不同会提示版本差异，
-具体调用仍以运行时响应为准。界面会显示运行时拒绝原因；监控断连时会关闭 WebSocket，让浏览器
-自动重连。监视器会显示上报的关节速度与电流，缺失值显示 `—`，不会假装为零；被抱起的机器人
-会明确标记为已暂停。
+移动方向以鸭子自身朝向为准。松开控件、隐藏页面或连接断开时会请求停止。
+侧移效果仍取决于策略，可能出现停滞或偏航，不保证直线侧移。
 
 ## 日常使用
 
@@ -172,111 +130,80 @@ robotd 卡片会同时显示实际运行的 daemon 版本、API 和构建源码�
 
 | 目的 | 命令 |
 |---|---|
-| 启动或干净重启全部服务，并验证控制链路 | `./scripts/dev-stack.sh` |
-| 默认在后台运行本机 MuJoCo | `./scripts/dev-stack.sh` |
-| 使用指定 RL 场景启动 | `./scripts/dev-stack.sh --scene scene_vslam.xml` |
-| 显式打开桌面 MuJoCo Viewer | `./scripts/dev-stack.sh --viewer` |
-| 启动但不执行仿真移动探针 | `./scripts/dev-stack.sh --skip-control-probe` |
-| 最后页面关闭 10 秒后停止后台 MuJoCo | `./scripts/dev-stack.sh --stop-on-browser-close` |
-| 启动全容器 CPU 渲染链路 | `./scripts/dev-stack.sh --sim-mode docker --gpu none` |
-| 使用 Linux DRI/EGL GPU 透传 | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` |
-| 使用 Linux NVIDIA/EGL GPU 透传 | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` |
-| 联合检查 Studio、`robotd`、`tofd` 和 MuJoCo | `./scripts/dev-stack.sh status` |
-| 在当前终端打开实时监控 | `./scripts/dev-stack.sh monitor` |
-| 仅停止该开发链路 | `./scripts/dev-stack.sh stop` |
+| 启动或重新启动整套服务 | `./scripts/dev-stack.sh` |
+| 检查服务状态 | `./scripts/dev-stack.sh status` |
+| 停止整套服务 | `./scripts/dev-stack.sh stop` |
+| 打开终端实时监控 | `./scripts/dev-stack.sh monitor` |
+| 使用指定场景 | `./scripts/dev-stack.sh --scene scene_vslam.xml` |
+| 使用 BAM 回差执行器仿真 | `./scripts/dev-stack.sh --actuator-model bam --scene scene_velstand.xml` |
+| 打开桌面 MuJoCo Viewer | `./scripts/dev-stack.sh --viewer` |
+| 最后一个页面关闭 10 秒后停止 MuJoCo | `./scripts/dev-stack.sh --stop-on-browser-close` |
+| 跳过启动时的仿真移动探针 | `./scripts/dev-stack.sh --skip-control-probe` |
 
-状态卡中的 `robotd` 与 MuJoCo 按钮会随连接状态显示“启动”或“重启”。按钮通过启动器创建的
-受限宿主机管理器执行固定操作，不接受任意命令；重启 MuJoCo 时会等待端口恢复并连带重启
-robotd。网页服务本身停止时按钮不可用，仍需执行 `./scripts/dev-stack.sh`。
-场景选择器只会列出 `microduck_rl` 中发现的 `scene*.xml`；应用场景时会写入经过校验的启动器
-配置，然后依次安全重启 MuJoCo 与 robotd。
+BAM 是可选的执行器仿真方式，配合 `scene_velstand.xml` 使用；默认仍使用 XML 执行器。
 
-只有显式使用 `--viewer` 时才会打开桌面窗口；关闭该窗口会停止仿真器，可以使用状态卡中的
-“启动”按钮恢复。默认后台模式仍使用同一份本机权威世界和离屏渲染。
-
-使用 `--stop-on-browser-close` 后，最后一个场景 WebSocket 持续断开 10 秒便只停止 MuJoCo；
-宽限期内刷新或重新连接会取消退出。未指定该参数时，后台 MuJoCo 会一直运行，直到执行
-`dev-stack.sh stop`。`--headless` 仍作为默认行为的兼容显式写法保留。
+默认后台模式需要通过 `stop` 命令关闭。macOS native 模式可加 `--stop-on-browser-close`：
+最后一个场景页面断开 10 秒后停止 MuJoCo，期间刷新或重连会取消退出。
+`--headless` 可显式选择后台运行；`--viewer` 会打开桌面窗口，关闭窗口也会停止 MuJoCo。
 
 ### 如何选择渲染模式
 
-本机 macOS 开发时，请使用默认命令；这是没有 Linux GPU 主机时唯一面向流畅本地演示的模式：
-
-| 场景 | 命令 | 渲染器与预期效果 |
+| 场景 | 命令 | 使用说明 |
 |---|---|---|
-| macOS 本地开发（推荐） | `./scripts/dev-stack.sh` | macOS 原生离屏 OpenGL；权威 MuJoCo 世界在后台运行，桌面 Viewer 不会打开。 |
-| 检查原生 Viewer | `./scripts/dev-stack.sh --viewer` | 对同一仿真服务打开桌面 Viewer；关闭窗口会停止 MuJoCo。 |
-| macOS Docker Desktop 或纯 CPU CI | `./scripts/dev-stack.sh --sim-mode docker --gpu none` | Docker 内的 OSMesa 软件渲染。物理和场景状态仍来自权威世界，但视频流可能较慢。 |
-| 配有集显/AMD/Intel GPU 的 Linux 主机 | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` | 将 `/dev/dri` 映射到 MuJoCo 容器并使用 EGL。 |
-| 已安装 NVIDIA Container Toolkit 的 Linux 主机 | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` | 请求 `gpus: all` 并使用 EGL。 |
+| macOS 本地开发 | `./scripts/dev-stack.sh` | 使用本机渲染，MuJoCo 在后台运行。 |
+| macOS Docker Desktop 或无 GPU 环境 | `./scripts/dev-stack.sh --sim-mode docker --gpu none` | 全部运行在 Docker，CPU 渲染可能较慢。 |
+| Linux DRI GPU | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` | 使用主机 `/dev/dri` 设备，需具备相应 GPU 和驱动。 |
+| Linux NVIDIA GPU | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` | 需安装 NVIDIA 驱动及 NVIDIA Container Toolkit。 |
 
-`dri` 是 Linux 的 Direct Rendering Infrastructure（直接渲染基础设施）：它通过主机 GPU
-设备文件提供访问，而不是另一套 GPU API。macOS Docker Desktop 不支持这种透传。GPU 选项必须
-显式写在命令行中，因此可从 Shell 历史清楚地看到使用了哪条硬件路径。`--gpu` 仅可与
-`--sim-mode docker` 同用；`--viewer` 和 `--stop-on-browser-close` 属于 native 模式，后者还要求
-以后台/headless 方式运行。
+GPU 类型通过 `--gpu` 显式选择，必须搭配 `--sim-mode docker`。
+macOS Docker Desktop 无法使用上述 Linux GPU 透传方式。实际帧率取决于硬件、场景和画质。
 
 ### 网页工作台说明
 
-页面包含三个实时区域，它们的数据权威各不相同：
+- **MuJoCo 场景**：查看世界或第一视角画面，选择场景、调整相机与画质。
+- **ROBOTD TELEMETRY**：查看机器人状态、传感器数据、关节目标与误差以及运动轨迹。
+- **控制与服务卡片**：操作机器人，查看各服务连接状态，点击启动或重启。
 
-| 区域 | 数据来源 | 可执行操作 |
-|---|---|---|
-| **MuJoCo 场景** | `duck-body` 提供的缓存 JPEG/PNG 世界画面与 640×360 UYVY 模拟头部相机流 | 在世界与第一视角间切换、选择白名单 RL 场景，或拖动/缩放/复位权威世界相机。 |
-| **ROBOTD TELEMETRY** | `robotd` monitor 协议与只读 `tofd` 订阅 | 查看策略、命令、机身/头部 IMU、动态传感器位姿、8×8 ToF 深度与状态、里程计、关节目标/偏差、机器人缩略图和循环频率。共享单调时钟用于显示传感器数据年龄，不引入另一套控制循环。 |
-| **控制与服务卡片** | `robotd` JSON-RPC 与启动器安装的固定操作服务管理器 | 发送移动意图、启用/停止技能；当启动器正在运行时，可启动/重启 `robotd` 或 MuJoCo。 |
+重启 MuJoCo 时会连带重启 `robotd`。如果网页服务本身已停止，请从终端执行启动命令。
 
 ### MuJoCo 场景目录
 
-场景下拉框只显示当前页面语言对应的场景名称。点击下拉框前面的**场景**，会把当前选中项对应的
-`.xml` 文件名复制到剪贴板；点击**应用**后，MuJoCo 才会使用这个经过白名单校验的场景重启。
+在下拉框中选择场景，点击**应用**后生效。点击选择框前的**场景**可复制当前场景文件名。
+可选条目取决于本地 RL 仓库包含的场景。
 
-桌面端会把实时 FPS、**世界**/**第一视角**、**场景**、选择框和**应用**保持在一行紧凑显示。
-**应用**紧邻选择框。较长名称在原生选择框关闭时可能被截断，但展开菜单仍会显示完整名称。
-中文模式只显示中文控件名称，英文模式只显示英文名称。
+| 文件 | 用途 |
+|---|---|
+| `scene.xml` | 默认平地场景。 |
+| `scene_allcollisions.xml` | 全身碰撞与接触检查。 |
+| `scene_apartment.xml` | 带家具的公寓环境。 |
+| `scene_backlash.xml` | 关节回差仿真。 |
+| `scene_ball.xml` | 足球与踢球交互。 |
+| `scene_rollers.xml` | 脚部滚轮仿真。 |
+| `scene_vslam.xml` | 带地标的视觉定位环境。 |
+| `scene_walk.xml` | 行走机器人模型。 |
+| `scene_walk_backlash.xml` | 带关节回差的行走模型。 |
+| `scene_velstand.xml` | 配合 BAM 使用的全身碰撞与回差场景。 |
 
-| 文件 | 中文名称 | 用途 |
-|---|---|---|
-| `scene.xml` | 标准场景 | 默认平地，使用经过筛选的地面接触碰撞模型。 |
-| `scene_allcollisions.xml` | 全身碰撞 | 为机器人所有部件启用碰撞几何，用于检查自碰撞和复杂接触。 |
-| `scene_apartment.xml` | 公寓场景 | 包含六个房间和家具，用于室内导航与定位实验。 |
-| `scene_backlash.xml` | 关节回差 | 在标准地面接触模型上模拟舵机齿轮间隙，用于 Sim2Real 检查。 |
-| `scene_ball.xml` | 足球场景 | 加入足球，用于踢球策略和球体交互测试。 |
-| `scene_rollers.xml` | 滚轮场景 | 使用脚部被动滚轮，用于滑行、滚轮平衡及相应策略测试。 |
-| `scene_vslam.xml` | 视觉定位 | 带非对称地标的大型特征房间，用于 VSLAM 漂移和闭环检测测试。 |
-| `scene_walk.xml` | 行走模型 | 平地中的行走专用机器人模型，用于检查运动策略。 |
-| `scene_walk_backlash.xml` | 行走回差 | 为行走模型加入舵机回差，用于更严格的 Sim2Real 验证。 |
+### 画质与语言
 
-使用页面顶部的语言切换选择中文或英文。它只改变界面文字，不会改变服务、策略或数值单位。
-场景卡片还可以选择画质档位：
+使用页面顶部的语言按钮切换中文或英文。在世界视角中选择画质：
 
-| 档位 | 最大画面尺寸 | 编码 | 适用情况 |
-|---|---:|---|---|
-| 流畅 | 960×540 | JPEG，质量 82 | 带宽和延迟要求最低。 |
-| 清晰（默认） | 1920×1080 | JPEG，质量 95 | 常规桌面使用。 |
-| 无损 | 1920×1080 | PNG | 适合静态检查，帧率可能明显降低。 |
+| 档位 | 画面上限 | 使用建议 |
+|---|---:|---|
+| 流畅 | 960×540 | 优先降低带宽和延迟。 |
+| 清晰（默认） | 1920×1080 | 常规桌面观看。 |
+| 无损 | 1920×1080 | 适合静态细节检查，帧率可能降低。 |
 
-浏览器会按场景 CSS 尺寸乘以屏幕像素倍率请求画面，再受当前档位的上限约束，从而避免高密度屏幕
-上被低分辨率视频放大后的模糊感。场景内容和仿真时间来自同一个 MuJoCo 权威世界；不同操作系统、
-GL 驱动或 GPU 型号之间不承诺逐像素完全一致。
+画面会按显示区域与屏幕像素倍率调整大小。FPS 显示实际收到并显示的帧率，24 FPS 是请求目标，
+不代表固定输出帧率。网页与本机仿真使用同一场景状态。
 
 ## `robotctl monitor`
 
-推荐命令会直接在当前终端打开实时可视化监控：
+在终端查看实时监控：
 
 ```bash
 ./scripts/dev-stack.sh monitor
 ```
-
-等价的 Compose 直接命令为：
-
-```bash
-docker compose run --rm --no-deps --build robotctl monitor
-```
-
-两种方式都会启动一个一次性的 `robotctl` 工具容器，并连接已有的运行时 socket；它们不会
-进入 Docker Shell 或正在运行的 `robotd` 容器。推荐使用脚本，因为它会先确认 `robotd`
-正在运行。
 
 | 按键 | 动作 |
 |---|---|
@@ -284,122 +211,51 @@ docker compose run --rm --no-deps --build robotctl monitor
 | `[` / `]` 或 `Left` / `Right` | 旋转三维机器人视角 |
 | `d` | 显示或隐藏三维机器人视图 |
 
-三维视图要求终端至少 110 列宽；较窄的终端仍可显示实时状态和关节表格。
+三维视图要求终端至少 110 列宽；较窄的终端仍可显示状态和关节表格。
 
 ## 三个项目如何协作
 
-该工作区包含三个独立 Git 仓库，各自保持单向、清晰的职责边界：
+- **microduck**：机器人运行时、策略执行与安全控制。
+- **microduck_rl**：MuJoCo 仿真、模型及训练工具。
+- **microduck-studio**：网页控制台和服务启动管理。
 
-```text
-浏览器
-   │ HTTP / JSON API
-   ▼
-Microduck Studio
-   │ Unix socket 上的 JSON-RPC / NDJSON
-   ▼
-robotd --sim ◀──────── policy.onnx + manifest ─────── microduck_rl 导出
-   │
-   │ TCP / NDJSON :7801
-   ▼
-duck-body / MuJoCo ────────────────────────────────── microduck_rl
-```
-
-- **microduck** 负责 `robotd`、硬件 I/O、安全、策略加载和电机控制权。
-- **microduck_rl** 负责 MuJoCo 模型、环境、奖励、训练和 ONNX 导出。
-- **microduck-studio** 负责浏览器体验、状态聚合和经过白名单限制的本地编排。
-
-运行时和训练项目都不依赖 Studio；Studio 只使用它们公开的协议和工具。浏览器场景由
-`duck-body` 在世界锁内快速复制权威 `MjData`，然后在锁外完成渲染和 JPEG 编码；Studio
-只长轮询缓存帧并转发给浏览器。因此动态物体、接触和其他场景元素都来自实际物理世界，
-不再是根据遥测重建的姿态镜像。
-在浏览器场景中拖动可旋转权威 MuJoCo 相机，使用鼠标滚轮或触控板可缩放，双击可恢复
-默认视角。
-
-### `robotd --sim` 的作用
-
-`robotd --sim` 是一种启动模式，不是独立的运行环境。它会运行完整的 `robotd`，只是用远程
-仿真适配器替代真实电机和传感器 I/O：
-
-- 从 `microduck_rl` 的 `duck-body` 服务读取关节与传感器状态。
-- 通过 TCP 把控制目标发送回 MuJoCo。
-- 控制循环、策略推理、安全检查和 JSON-RPC 接口保持不变。
-- Studio 和 `robotctl` 因而可以使用与真机相同的控制接口操作仿真机器人。
-
-该后端不会启动 Viewer、执行训练或绕过 `robotd` 的安全逻辑。Docker 为一键工作流提供
-进程和依赖隔离，与 `--sim` 启动模式是两个不同概念。
-
-## 容器和进程
-
-### Compose 布局
-
-项目使用的容器定义全部保存在本仓库，并按组件隔离：
-
-```text
-docker/
-├── microduck/       # robotd 与 robotctl 运行镜像
-├── microduck-rl/    # 无窗口权威 MuJoCo 渲染镜像
-└── studio/          # Studio Web 与画面代理镜像
-compose.yaml             # 基础服务与 CPU 渲染
-compose.gpu-dri.yaml     # Linux /dev/dri + EGL 覆盖配置
-compose.gpu-nvidia.yaml  # Linux NVIDIA + EGL 覆盖配置
-```
-
-不带参数时始终使用 macOS 原生权威渲染器，但在后台运行且不打开 Viewer；需要桌面 Viewer
-时显式传入 `--viewer`。Docker/GPU
-模式只能通过命令行参数选择，确保当前硬件模式清楚地留在 Shell 历史中。
-`--sim-mode docker` 会把 `duck-body` 也放入 Compose。macOS Docker Desktop 不支持
-Linux GPU 透传，因此其
-OSMesa 渲染能保持场景一致，但速度较慢；流畅演示请使用 native 模式。Linux 主机上，
-必须显式传入 `--gpu dri` 才会映射 `/dev/dri`，或传入 `--gpu nvidia` 申请 `gpus: all`；
-两者使用相同的 EGL
-画面协议和网页界面。
-
-浏览器默认使用**清晰**档，并根据实际 CSS 尺寸乘以屏幕像素倍率请求画面。**流畅**档上限为
-`960x540`、JPEG 质量 82；**清晰**档上限为 `1920x1080`、JPEG 质量 95；**无损**档上限为
-`1920x1080`、PNG。启动阶段的回退画面为 `1280x720`、24 FPS、JPEG 质量 95，可通过
-`MICRODUCK_RENDER_WIDTH`、`MICRODUCK_RENDER_HEIGHT`、`MICRODUCK_RENDER_FPS` 与
-`MICRODUCK_RENDER_QUALITY` 覆盖；`MICRODUCK_MUJOCO_GL` 可显式指定 MuJoCo GL 后端。
+## 故障排查
 
 ### 诊断命令
 
 ```bash
 docker compose ps
 docker compose logs -f studio robotd tofd
-docker compose run --rm --no-deps robotctl health
 ```
-
-最后一条命令会运行临时工具容器，不会打开 Docker Shell。
 
 ### 常见启动和显示问题
 
 | 现象 | 检查与恢复方式 |
 |---|---|
-| 场景一直显示“等待 MuJoCo 画面” | 执行 `./scripts/dev-stack.sh status`，再检查 `.studio-runtime/dev-stack/mujoco.log`。Studio 在线时可使用 MuJoCo 卡片的启动/重启；网页无法打开时重新执行 `./scripts/dev-stack.sh`。 |
-| 控制操作没有让仿真机器人移动 | 确认三个状态卡片都已连接，点击**启用 RL**，然后不要使用 `--skip-control-probe`，重新执行默认启动命令。只有跨仓库契约全部通过后，启动器才会报告 `contract probe passed`。 |
-| Docker 模式下场景很卡 | macOS 请使用默认 native 模式；Docker 内的 OSMesa 是 CPU 渲染。在支持的 Linux 主机上使用显式 `dri` 或 `nvidia` GPU 模式。优先切换为**流畅**档，而不是降低权威物理频率。 |
-| 意外弹出了 MuJoCo 桌面窗口 | 仅传入 `--viewer` 才会打开 Viewer。请停止后使用 `./scripts/dev-stack.sh` 重启，它默认在后台运行。 |
-| 启动/重启按钮不可用 | 这些按钮只会在 `dev-stack.sh` 安装本地白名单服务管理器后启用；它们不能启动 Studio Web 服务本身，此时应在终端重新启动整套服务。 |
+| 一直等待 MuJoCo 画面 | 执行 `./scripts/dev-stack.sh status`；网页在线时尝试 MuJoCo 卡片的启动/重启，否则从终端重新启动。 |
+| Docker 模式画面较卡 | macOS 使用默认 native 模式，或把画质切换为**流畅**；Linux 可按硬件条件选择 GPU 参数。 |
+| 意外出现桌面 Viewer | 停止服务后使用默认启动命令，去掉 `--viewer`。 |
+| 网页启动/重启按钮不可用 | 从终端运行 `./scripts/dev-stack.sh`，恢复服务管理功能。 |
+| 提示缺少 Pillow | 在 RL 仓库执行 `uv sync --extra visualization`，再重新启动。 |
+
+### 页面无法控制机器人时
+
+1. 执行 `./scripts/dev-stack.sh status`，确认服务在线。
+2. 确认机器人与仿真器已连接，点击**启用 RL**。
+3. 查看 `docker compose logs -f studio robotd` 的报错。
+4. 重新运行默认启动命令，等待 `contract probe passed`。
 
 ### 分别运行组件
 
-<details>
-<summary><strong>仅运行 MuJoCo Viewer</strong></summary>
-
-如果完整链路已占用 7801 端口，请先停止它，然后从同级 RL 仓库启动仿真器身体：
+仅运行桌面 MuJoCo Viewer：
 
 ```bash
 ./scripts/dev-stack.sh stop
 cd ../microduck_rl
-uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801 --render
+uv run --extra visualization mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801 --render
 ```
 
-关闭 Viewer 或按 `Ctrl-C` 即可停止。该模式会提供仿真器 TCP 端点，但不会启动 `robotd`
-或 Studio。
-
-</details>
-
-<details>
-<summary><strong>仅运行 Studio</strong></summary>
+仅运行 Studio 网页：
 
 ```bash
 uv sync --extra dev
@@ -407,30 +263,15 @@ cp .env.example .env
 uv run microduck-studio
 ```
 
-这只会启动 Web 服务。默认机器人 socket 为 `/run/robotd.sock`；Compose 链路则通过命名
-运行时卷共享该 socket。8090 端口可以避开通常使用 8080 的 `microduck` 服务。
-
-</details>
-
-## 页面无法控制机器人时
-
-1. 执行 `./scripts/dev-stack.sh status`；Studio、`robotd` 和 MuJoCo 必须全部在线/健康。
-2. 确认 `robotd` 和仿真器卡片都已连接，然后点击 **启用 RL**。
-3. 检查 `docker compose logs -f studio robotd` 和
-   `.studio-runtime/dev-stack/mujoco.log`，查找断连或策略拒绝信息。
-4. 重新执行 `./scripts/dev-stack.sh`。它会停止上次启动所属的进程，并在报告就绪前重新
-   执行跨仓库契约探测。
+这只启动网页，机器人和仿真服务需要单独运行。
 
 ## 训练冒烟测试
 
-训练任务默认关闭。在宿主机上直接运行 Studio 时，可以这样启用：
+训练任务默认关闭。在宿主机上直接运行 Studio 时，可启用 64 环境、5 次迭代的训练冒烟测试：
 
 ```bash
 MICRODUCK_STUDIO_ENABLE_JOBS=true uv run microduck-studio
 ```
-
-Studio 只开放文档规定的 64 环境、5 次迭代冒烟测试。它使用 `shell=False` 构造白名单
-`uv run train ...` 参数列表；任意 Shell 命令和长时间训练任务都不会开放。
 
 ## 开发
 
@@ -444,8 +285,7 @@ node --test tests/test_frontend.mjs
 
 ## 安全
 
-Studio v0.1 没有身份验证。除非处于可信局域网，否则请绑定到 `127.0.0.1`。Studio 只发送
-意图；`robotd` 始终是唯一的安全和电机控制权威。
+网页没有身份验证，应仅在本机或可信网络中使用。机器人动作与安全限制由 `robotd` 执行。
 
 ## 许可证
 

@@ -33,22 +33,15 @@
   <a href="#when-the-page-does-not-move-the-robot">Troubleshooting</a>
 </p>
 
-Microduck Studio connects the existing
+Microduck Studio brings Microduck simulation, live monitoring, and robot controls into one
+browser workspace. It connects the existing
 [`microduck`](https://github.com/pollen-robotics/microduck) runtime and
-[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl) simulation/training project in
-one browser-based development workflow. It presents status and safe control; it does not duplicate
-robot safety, policy inference, simulator physics, or training logic.
+[`microduck_rl`](https://github.com/pollen-robotics/microduck_rl) simulator.
 
 ## Start with an AI coding agent
 
-Any local AI coding agent with repository and terminal access can start the complete stack; no
-tool-specific integration is required. Supported examples include
-[Codex](https://developers.openai.com/codex/),
-[Claude Code](https://code.claude.com/docs/en/overview),
-[Cursor Agent](https://cursor.com/docs/agent/overview), and
-[GitHub Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-copilot-cli).
-
-Open the `microduck-dev` workspace in a local session and use this prompt:
+Open the `microduck-dev` workspace in a local AI coding agent with repository, terminal, and
+Docker access, then use this prompt:
 
 ```text
 Start all Microduck Studio services. First read AGENTS.md and microduck-studio/README.md. Check the
@@ -58,8 +51,7 @@ Studio URL and the status of Studio, robotd, tofd, and MuJoCo. Do not start a tr
 switch or modify the working branches of the sibling repositories.
 ```
 
-> Use a local agent session with access to Docker and the desktop. A cloud or background agent can
-> run in a different machine and cannot display the native MuJoCo Viewer on the development host.
+Use a local session on the development machine so the agent can reach its Docker services.
 
 ## Quick start
 
@@ -68,134 +60,87 @@ switch or modify the working branches of the sibling repositories.
 - Docker with Docker Compose
 - `git` and `curl`
 - Python 3 and [`uv`](https://docs.astral.sh/uv/)
+- macOS for the default native mode; Linux users should select Docker mode below
 
-> The individual projects can run directly on the host and do not inherently require Docker.
-> The `dev-stack.sh` launcher does require Docker because it isolates the `robotd` and Studio Web
-> build and runtime environments. On macOS, Docker Desktop is one option; any compatible Docker
-> runtime is suitable.
+The one-command stack uses Docker for `robotd`, `tofd`, and Studio. On macOS, Docker Desktop or
+another compatible Docker runtime must already be running.
 
 ### 1. Download the three repositories
 
-Studio is not standalone: `microduck` supplies `robotd` and its policies, while `microduck_rl`
-supplies the MuJoCo body and Viewer. All three repositories must be sibling directories under one
-workspace:
+Keep the repositories beside one another:
 
 ```text
-microduck-dev/          # workspace only; not a Git repository
-├── microduck/          # robotd, robotctl, policies, and runtime protocol
-├── microduck_rl/       # MuJoCo body, Viewer, environments, and training
-└── microduck-studio/   # Web UI and development-stack orchestration
+microduck-dev/
+├── microduck/          # robot runtime
+├── microduck_rl/       # MuJoCo simulation and training
+└── microduck-studio/   # browser workspace and service startup
 ```
-
-For a fresh workspace, clone the repositories used by this development setup:
 
 ```bash
 mkdir -p ~/microduck-dev
 cd ~/microduck-dev
 
 git clone https://github.com/microai-lab/microduck.git
-git clone https://github.com/microai-lab/microduck_rl.git
+git clone --branch develop https://github.com/microai-lab/microduck_rl.git
 git clone https://github.com/microai-lab/microduck-studio.git
 ```
 
-Download links: [microduck](https://github.com/microai-lab/microduck),
-[microduck_rl](https://github.com/microai-lab/microduck_rl), and
-[microduck-studio](https://github.com/microai-lab/microduck-studio). The first two are development
-forks of the [official runtime](https://github.com/pollen-robotics/microduck) and
-[official RL repository](https://github.com/pollen-robotics/microduck_rl).
+These development forks include the features used by Studio. If the repositories already exist,
+check their directory layout and keep `microduck` on a compatible `main` and `microduck_rl` on a
+compatible `develop`. The launcher does not switch their working branches.
 
-Existing repositories do not need to be cloned again; their directory layout only needs to match
-the structure above.
+### 2. Prepare the native MuJoCo environment
 
-### 2. Prepare the simulation backend
-
-The regular `microduck` `main` branch provides the remote `RobotIo` implementation that connects
-`robotd --sim` to the MuJoCo body service at TCP `127.0.0.1:7801` by default. Keep the sibling
-repository on an up-to-date `main`; the launcher archives that commit into isolated Studio state
-without switching or modifying its working tree. Set `MICRODUCK_SIM_REF` to a release tag when a
-reproducible runtime version is required.
-
-Policy files are no longer stored in the runtime source tree. Studio reads the policy repository
-and version from the selected runtime's `Cargo.toml`, then runs its `scripts/seed-policies.sh`.
-Each pin has a separate cache under `.studio-runtime/dev-stack/policies/<owner--repo>/<version>`;
-later launches can reuse a complete cached set offline. The full manifest and every listed ONNX
-file must be present before startup. Older imported caches stay on disk; they do not silently
-replace the policy set required by a newer runtime.
-
-The current integration targets `microduck` **0.17.8** (IPC API **44**) and the October 12, 2026
-`microduck_rl` `develop` revision, with the Fork's visualization service retained. The runtime
-selects `pollen-robotics/microduck-policies@v8`. Studio leaves policy slot paths, gains, and skill
-timing to `robotd` and that set's manifest; the default walking/standing gait is `velstand.onnx`.
-The runtime image also includes the upstream pickup detector model, and embeds the selected Git
-revision into the binaries so `hello` reports the source that actually ran.
-
-This revision also requires the RL fork's `--actuator-model` support from commit
-`eb76427376d5105954f53614be8f838f8298b5d5` or a later compatible revision. The launcher passes
-this argument for both the default XML path and the optional BAM path.
-
-Studio's generated simulation configuration uses `[control] cmd_alpha = 1.0` to pass velocity
-commands through without the runtime's default `0.2` smoothing. In repeated v8 tests, smoothing
-could leave a stopped duck standing when commanded to move sideways; pass-through improved
-lateral step initiation in several trials, but did not establish reliable sideways motion.
-This override applies to the development stack's `robotd --sim` only.
-The policy can still drift forward and turn during a lateral command; successful delivery of
-`vy` does not guarantee precise sideways motion.
-
-### 3. Prepare the RL environment
-
-The native macOS Viewer runs from the `microduck_rl` virtual environment:
+For native macOS background rendering or the desktop Viewer:
 
 ```bash
 cd ~/microduck-dev/microduck_rl
-uv sync
+uv sync --extra visualization
 ```
 
-### 4. Start and verify everything
+Docker mode prepares its rendering environment inside the container instead.
+
+### 3. Start and verify the services
 
 ```bash
 cd ~/microduck-dev/microduck-studio
 ./scripts/dev-stack.sh
 ```
 
-Open **http://127.0.0.1:8090**. The default `native` mode starts MuJoCo in the macOS background for
-smooth native OpenGL offscreen rendering without opening the desktop Viewer. A simulation-enabled
-`robotd`, `tofd`, and Studio run in Docker. The launcher then verifies the selected runtime revision,
-policy mount, robot/ToF/head-IMU subscriptions, movement, explicit stop, and disconnect stop.
-Do not treat a reachable page alone as ready; wait for:
+On Linux or for a fully containerized environment, use
+`./scripts/dev-stack.sh --sim-mode docker --gpu none` instead.
+
+Open **http://127.0.0.1:8090**. In the default native mode, MuJoCo runs in the macOS background
+and the desktop Viewer stays closed. The first launch downloads the official v8 policies and
+builds the containers. Wait for the startup check to report:
 
 ```text
 contract probe passed: runtime source, policies, subscription, movement ... m, stop, disconnect
 ```
 
-> The launcher never switches a sibling repository's working branch. It extracts the selected
-> runtime revision into isolated Studio state and reports that exact ref and commit in the UI.
+The startup check includes a brief simulated movement and stop test. Add `--skip-control-probe`
+when you want to start without that movement test.
 
 ## Capabilities
 
-| Area | Included |
+| Feature | What you can do |
 |---|---|
-| Web control | Phone-friendly movement, enable/stop, sit/stand, roulade, and kicks |
-| Live visibility | Selectable MuJoCo scenes, world/head-camera views, synchronized IMU/ToF/frame telemetry, repository/job status, and model discovery |
-| Safe orchestration | Docker Compose lifecycle, a cross-repository contract probe, and allowlisted RL smoke tests |
+| Robot control | Move forward/backward/sideways, turn, enable/stop RL, and run sit/stand, roulade, or kick actions. |
+| Live MuJoCo video | Switch between the world view and the robot's simulated head-camera view. |
+| Camera controls | Drag to rotate, use the wheel or trackpad to zoom, and double-click to reset. |
+| Image quality | Choose Smooth, Clear, or Lossless images up to 1920×1080; view the actual FPS. |
+| Scene selection | Select and apply a scene, restarting the simulator and robot service. |
+| Live robot monitor | Inspect policy, commands, joints, IMU, 8×8 ToF, odometry, safety state, and loop rate. |
+| Service controls | Check connections and start or restart `robotd` and MuJoCo. |
+| Language | Switch the page between Chinese and English. |
+| Runtime modes | Use native macOS background rendering, fully containerized CPU rendering, or Linux GPU options. |
 
-Motion uses one persistent `robotd` connection. Releasing a control, hiding the page, disconnecting,
-or shutting Studio down sends `robot.stop`; `robotd` remains the final safety and motor authority.
-The browser serializes movement and stop HTTP requests, keeps only the latest queued direction,
-and preserves a stop before a new press. A stop waits for any in-flight request to finish,
-preserving successful request order; network latency and robotd's deadman still apply.
+Hold a movement button to move and release it to stop. Directions follow the duck's orientation.
+Hiding or disconnecting the page also requests a stop. Movement quality, including sideways
+travel, depends on the selected policy.
 
-The left button sends `[vx=0, vy=0.6, vyaw=0]` to help the official v8 policy start in
-the default XML simulation; right stays at `vy=-0.3`. This exceeds the checkpoint's
-trained lateral command range of ±0.3 and is a simulation demo workaround. It does
-not change model weights or add heading compensation, and does not establish
-accurate lateral speed or a straight trajectory. Releasing the button still sends
-the same explicit stop.
-
-The robotd card reports the running daemon version and API alongside the built source revision.
-A different API is shown as a version difference; individual RPC responses remain authoritative.
-Runtime refusals are displayed with their reason, and monitor disconnections close the WebSocket
-so the browser can reconnect. The monitor includes measured joint velocity and current when
-reported; a missing value is shown as `—`, not zero. A picked-up robot is explicitly marked paused.
+The monitor shows missing sensor values as `—` and displays runtime refusal or disconnection
+messages. A picked-up robot is marked paused.
 
 ## Daily workflow
 
@@ -203,134 +148,94 @@ Run these commands from `microduck-studio`:
 
 | Goal | Command |
 |---|---|
-| Start or cleanly restart everything and verify control | `./scripts/dev-stack.sh` |
-| Run native MuJoCo in the background (default) | `./scripts/dev-stack.sh` |
-| Start with a specific RL scene | `./scripts/dev-stack.sh --scene scene_vslam.xml` |
-| Explicitly select the v8 BAM/backlash physics | `./scripts/dev-stack.sh --actuator-model bam --scene scene_velstand.xml` |
-| Explicitly open the desktop MuJoCo Viewer | `./scripts/dev-stack.sh --viewer` |
-| Start without the simulated movement probe | `./scripts/dev-stack.sh --skip-control-probe` |
-| Stop background MuJoCo 10 s after the last page closes | `./scripts/dev-stack.sh --stop-on-browser-close` |
-| Start the fully containerized CPU renderer | `./scripts/dev-stack.sh --sim-mode docker --gpu none` |
-| Use Linux DRI/EGL GPU passthrough | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` |
-| Use Linux NVIDIA/EGL GPU passthrough | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` |
-| Check Studio, `robotd`, `tofd`, and MuJoCo together | `./scripts/dev-stack.sh status` |
-| Open the live terminal monitor | `./scripts/dev-stack.sh monitor` |
-| Stop only this development stack | `./scripts/dev-stack.sh stop` |
+| Start or cleanly restart and verify the stack | `./scripts/dev-stack.sh` |
+| Check all services | `./scripts/dev-stack.sh status` |
+| Stop the stack | `./scripts/dev-stack.sh stop` |
+| Open the terminal monitor | `./scripts/dev-stack.sh monitor` |
+| Start with a particular scene | `./scripts/dev-stack.sh --scene scene_vslam.xml` |
+| Open the desktop MuJoCo Viewer | `./scripts/dev-stack.sh --viewer` |
+| Start without the movement test | `./scripts/dev-stack.sh --skip-control-probe` |
+| Stop native MuJoCo after the last page closes | `./scripts/dev-stack.sh --stop-on-browser-close` |
 
-The `robotd` and MuJoCo status cards show Start or Restart according to connection state. These
-buttons use a restricted host manager created by the launcher; it accepts only fixed service
-operations. Restarting MuJoCo waits for its port and then restarts robotd as well. If the Web
-service itself is down, use `./scripts/dev-stack.sh` because the buttons are not reachable.
-The scene selector uses only `scene*.xml` files discovered in `microduck_rl`; applying a scene
-updates the validated launcher configuration and safely restarts MuJoCo followed by robotd.
+The `robotd` and MuJoCo cards show **Start** or **Restart** according to their current status.
+Restarting MuJoCo also reconnects the robot service. If Studio itself is unavailable, restart it
+from the terminal with `./scripts/dev-stack.sh`.
 
-Only `--viewer` opens the desktop window. Closing that window stops the simulator; use the Start
-button on its status card to restore it. The default background mode uses the same native
-authoritative world and offscreen renderer.
+Only `--viewer` opens a desktop window. Closing that window stops MuJoCo. The default background
+mode continues running until `./scripts/dev-stack.sh stop`; `--headless` explicitly selects the
+same background behavior.
 
-Add `--stop-on-browser-close` to stop only MuJoCo after the final scene WebSocket remains
-disconnected for 10 seconds. A page refresh or reconnect inside that grace period cancels the
-shutdown. Without this option, background MuJoCo continues until `dev-stack.sh stop`. `--headless`
-remains available as an explicit compatibility spelling of the default behavior.
+In native background mode, `--stop-on-browser-close` stops only MuJoCo after the last scene page
+has been disconnected for 10 seconds. Refreshing or reconnecting during that grace period cancels
+the shutdown.
 
-### Choose a rendering mode
+### Rendering modes and GPU options
 
-Actuator physics is independent of the rendering backend. The default remains `xml`; use
-`--actuator-model bam --scene scene_velstand.xml` for the training-aligned v8 robot, in either
-`native` or `docker` mode. `MICRODUCK_ACTUATOR_MODEL` can override the default; an explicit CLI
-argument wins. The launcher keeps the selected scene unchanged: BAM with a legacy scene changes
-its actuators but does not supply the missing backlash geometry. This optional physics path is
-not a claim that the current policy passes stable lateral-walking acceptance.
-
-Native BAM uses the locked `microduck_rl` virtual environment. The Docker renderer installs the
-exact MuJoCo, NumPy, and Pillow versions recorded in that repository's `uv.lock`, so rebuilding
-does not silently upgrade the physics engine. It also installs the official locked BAM revision
-using `--no-deps`, plus colorama; it does not install Torch, mjlab, or training extras. GPU
-selection continues to use the separate `--gpu` rendering option.
-
-Use the default command for a local macOS development machine. It is the only mode intended for a
-smooth local demo without a Linux GPU host:
-
-| Situation | Command | Renderer and expected result |
+| Situation | Command | Result |
 |---|---|---|
-| macOS local development (recommended) | `./scripts/dev-stack.sh` | Native macOS offscreen OpenGL; the authoritative MuJoCo world runs in the background and the desktop Viewer stays closed. |
-| Inspect the native Viewer | `./scripts/dev-stack.sh --viewer` | Opens the desktop Viewer against the same simulation service; closing it stops MuJoCo. |
-| Docker Desktop on macOS or CPU-only CI | `./scripts/dev-stack.sh --sim-mode docker --gpu none` | Dockerized OSMesa software renderer. Physics and scene state remain authoritative, but the video stream can be slow. |
-| Linux host with an integrated/AMD/Intel GPU | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` | Maps `/dev/dri` into the MuJoCo container and uses EGL. |
-| Linux host with NVIDIA Container Toolkit | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` | Requests `gpus: all` and uses EGL. |
+| macOS native rendering | `./scripts/dev-stack.sh` | Background MuJoCo without a desktop Viewer. |
+| Fully containerized CPU mode | `./scripts/dev-stack.sh --sim-mode docker --gpu none` | MuJoCo, robotd, and Studio run in Docker; software-rendered video may be slower. |
+| Linux DRI GPU interface | `./scripts/dev-stack.sh --sim-mode docker --gpu dri` | Uses an available host `/dev/dri` GPU; requires compatible drivers. |
+| Linux NVIDIA GPU interface | `./scripts/dev-stack.sh --sim-mode docker --gpu nvidia` | Uses the host NVIDIA GPU; requires NVIDIA Container Toolkit. |
 
-`dri` is Linux Direct Rendering Infrastructure: access to the host GPU device files rather than a
-separate GPU API. It is not available through Docker Desktop on macOS. GPU choices are explicit
-command-line arguments, so a shell history shows exactly which hardware path was used. `--gpu` is
-valid only with `--sim-mode docker`; `--viewer` and `--stop-on-browser-close` are native-mode
-options, and the latter requires background/headless operation.
+GPU selection is explicit in the startup arguments. These Linux GPU interfaces are configurable;
+performance must be checked on the target host. Docker Desktop on macOS cannot use these Linux GPU
+paths. `--gpu` applies only to Docker mode; `--viewer` and `--stop-on-browser-close` are native options.
 
-### Web workspace guide
+XML physics remains the default. To try the optional BAM/backlash scene, use
+`./scripts/dev-stack.sh --actuator-model bam --scene scene_velstand.xml`; this selection is available
+with either native or Docker rendering.
 
-The page has three live surfaces with deliberately different sources of truth:
+### Scene selection
 
-| Surface | Source | What you can do |
-|---|---|---|
-| **MuJoCo scene** | Cached JPEG/PNG world frames plus the simulated 640×360 UYVY head-camera stream from `duck-body` | Switch between World and Head camera, select an allowlisted RL scene, or drag/zoom/reset the authoritative world camera. |
-| **ROBOTD TELEMETRY** | The `robotd` monitor protocol plus read-only `tofd` subscriptions | Inspect policy, commands, trunk/head IMUs, dynamic sensor poses, 8×8 ToF depth/status, odometry, joint targets/errors, robot thumbnail, and loop rate. Shared monotonic timestamps expose sensor age without introducing another control loop. |
-| **Control and service cards** | `robotd` JSON-RPC plus the launcher-installed, fixed-operation service manager | Send motion intents, enable/stop skills, and Start/Restart `robotd` or MuJoCo when the launcher is running. |
+Choose a scene and click **Apply** to restart MuJoCo with it. Click **Scene** beside the selector
+to copy the selected `.xml` filename.
 
-### MuJoCo scene catalog
+Available scenes depend on the local RL repository.
 
-The selector shows only the translated scene name. Click the **Scene** control immediately before
-the selector to copy the selected scene's `.xml` filename; **Apply** then restarts MuJoCo with the
-selected allowlisted scene.
+| File | Use |
+|---|---|
+| `scene.xml` | Flat-ground simulation. |
+| `scene_allcollisions.xml` | Robot self-collision and contact inspection. |
+| `scene_apartment.xml` | Furnished indoor scene. |
+| `scene_backlash.xml` | Simulated servo gear play. |
+| `scene_ball.xml` | Kicks and ball interactions. |
+| `scene_rollers.xml` | Passive foot-roller simulation. |
+| `scene_vslam.xml` | Room with visual landmarks. |
+| `scene_walk.xml` | Walking robot on flat ground. |
+| `scene_walk_backlash.xml` | Walking model with gear play. |
+| `scene_velstand.xml` | Full-collision/backlash scene for the optional BAM mode. |
 
-On desktop, the live FPS indicator, **World**/**Head camera** switch, **Scene** control, selector,
-and **Apply** button stay in one compact row, with **Apply** directly beside the selector. A long
-label may be clipped in the closed native selector, but its complete name remains available in the
-opened menu. Chinese mode displays only Chinese control labels; English mode displays only English
-labels.
+### Image quality and language
 
-| File | Chinese name | Purpose |
-|---|---|---|
-| `scene.xml` | 标准场景 | Default flat floor with the curated ground-contact collision model. |
-| `scene_allcollisions.xml` | 全身碰撞 | Enables collision geometry for every robot part to inspect self-collision and complex contacts. |
-| `scene_apartment.xml` | 公寓场景 | Six-room furnished apartment for indoor navigation and localization experiments. |
-| `scene_backlash.xml` | 关节回差 | Standard ground-contact model with simulated servo gear play for sim-to-real checks. |
-| `scene_ball.xml` | 足球场景 | Adds a ball for kick-policy and ball-interaction testing. |
-| `scene_rollers.xml` | 滚轮场景 | Uses passive foot rollers for glide, roller-balance, and roller-policy tests. |
-| `scene_vslam.xml` | 视觉定位 | Large feature-rich room with asymmetric landmarks for VSLAM drift and loop-closure tests. |
-| `scene_walk.xml` | 行走模型 | Walking-specific robot model on a flat floor for locomotion-policy inspection. |
-| `scene_walk_backlash.xml` | 行走回差 | Walking model with simulated servo backlash for stricter sim-to-real validation. |
+Use the language switch at the top of the page for Chinese or English. The scene card provides
+these image profiles:
 
-Use the language switch in the page header to choose Chinese or English. It changes UI labels only;
-the underlying service, policy, and unit values do not change. Frame profiles are also selected in
-the scene card:
+| Profile | Maximum frame size | Suggested use |
+|---|---:|---|
+| Smooth | 960×540 | Lower bandwidth and latency. |
+| Clear (default) | 1920×1080 | Normal desktop viewing. |
+| Lossless | 1920×1080 | Static detail inspection; frame rate may be lower. |
 
-| Profile | Maximum frame size | Encoding | When to use it |
-|---|---:|---|---|
-| Smooth | 960×540 | JPEG, quality 82 | Lowest bandwidth and latency. |
-| Clear (default) | 1920×1080 | JPEG, quality 95 | Normal desktop use. |
-| Lossless | 1920×1080 | PNG | Still inspection; it may reduce frame rate considerably. |
-
-The browser asks for the scene's CSS size multiplied by the display pixel ratio, then the selected
-profile applies its cap. This avoids a blurry low-resolution stream on high-density displays.
-Scene content and simulation time are identical to the MuJoCo authority; pixel-for-pixel equality
-between different operating systems, GL drivers, or GPU vendors is not promised.
+The scene shows the actual received video FPS, image resolution, and simulation time. Image
+quality, scene complexity, and host load affect frame rate. The default startup target is
+1280×720 at 24 FPS; this is a requested target, rather than a fixed output rate.
 
 ## `robotctl monitor`
 
-The recommended command opens the live visual monitor directly in the current terminal:
+Open the live visual monitor in the current terminal:
 
 ```bash
 ./scripts/dev-stack.sh monitor
 ```
 
-The direct Compose equivalent is:
+Or run it directly with Compose:
 
 ```bash
 docker compose run --rm --no-deps --build robotctl monitor
 ```
 
-Both launch a disposable `robotctl` tool container attached to the existing runtime socket. They do
-not enter a Docker shell or the running `robotd` container. The wrapper is preferred because it
-first verifies that `robotd` is running.
+The stack must already be running.
 
 | Key | Action |
 |---|---|
@@ -338,88 +243,31 @@ first verifies that `robotd` is running.
 | `[` / `]` or `Left` / `Right` | Rotate the 3D robot view |
 | `d` | Show or hide the 3D robot view |
 
-The 3D view needs a terminal at least 110 columns wide. Status and joint tables still work in a
+The 3D view needs a terminal at least 110 columns wide; status and joint tables work in a
 narrower terminal.
 
 ## How the projects fit together
 
-The workspace contains three independent Git repositories with one-way ownership boundaries:
+- **microduck** provides the robot runtime, policies, and safety controls.
+- **microduck_rl** provides MuJoCo simulation and training.
+- **microduck-studio** provides the browser controls, monitoring, and service startup.
 
-```text
-Browser
-   │ HTTP / JSON API
-   ▼
-Microduck Studio
-   │ JSON-RPC / NDJSON over a Unix socket
-   ▼
-robotd --sim ◀──────── policy.onnx + manifest ─────── microduck_rl export
-   │
-   │ TCP / NDJSON :7801
-   ▼
-duck-body / MuJoCo ────────────────────────────────── microduck_rl
-```
+## When the page does not move the robot
 
-- **microduck** owns `robotd`, hardware I/O, safety, policy loading, and motor authority.
-- **microduck_rl** owns MuJoCo models, environments, rewards, training, and ONNX export.
-- **microduck-studio** owns the browser experience, status aggregation, and allowlisted local
-  orchestration.
+1. Run `./scripts/dev-stack.sh status` and confirm Studio, `robotd`, and MuJoCo are ready.
+2. Click **Enable RL**, then try holding a movement control.
+3. Use the `robotd` or MuJoCo card's **Start/Restart** action if either service is disconnected.
+4. If the page is unavailable, run `./scripts/dev-stack.sh` again and wait for the startup check.
 
-Neither runtime nor training depends on Studio. Studio consumes their public protocols and tools.
-For the browser scene, `duck-body` snapshots its authoritative `MjData` under the world lock, then
-renders and JPEG-encodes outside that lock. Studio only long-polls the cached frame and proxies it
-to the browser. Dynamic objects, contacts, and every other scene element therefore come from the
-same world as the physics rather than from a reconstructed pose mirror.
-Drag the browser scene to orbit the authoritative MuJoCo camera, use the mouse wheel or trackpad
-to zoom, and double-click to restore the default view.
+| Problem | Recovery |
+|---|---|
+| Waiting for MuJoCo frames | Check service status and use MuJoCo **Start/Restart**. |
+| Choppy Docker video on macOS | Use native mode or select the **Smooth** image profile. |
+| Unexpected desktop Viewer | Stop the stack and restart without `--viewer`. |
+| Rendering dependency missing in native mode | Run `uv sync --extra visualization` in `microduck_rl`. |
+| Web Start/Restart buttons unavailable | Start the stack with `./scripts/dev-stack.sh`; the buttons are available for launcher-managed services. |
 
-### What `robotd --sim` does
-
-`robotd --sim` is a startup mode, not a separate runtime environment. It runs the complete
-`robotd` while replacing physical motor and sensor I/O with a remote simulation adapter:
-
-- Joint and sensor state comes from the `microduck_rl` `duck-body` service.
-- Control targets are sent back to MuJoCo over TCP.
-- The control loop, policy inference, safety checks, and JSON-RPC interface remain unchanged.
-- Studio and `robotctl` therefore use the same control interface for simulation and hardware.
-
-The simulation backend does not start the Viewer, run training, or bypass `robotd` safety logic.
-Docker provides process and dependency isolation for the one-command workflow; it is separate from
-the `--sim` mode itself.
-
-## Containers and processes
-
-### Compose layout
-
-All project-owned container definitions live here and are separated by component:
-
-```text
-docker/
-├── microduck/       # robotd + robotctl runtime image
-├── microduck-rl/    # headless authoritative MuJoCo renderer image
-└── studio/          # Studio web and frame proxy image
-compose.yaml             # base services and CPU renderer
-compose.gpu-dri.yaml     # Linux /dev/dri + EGL override
-compose.gpu-nvidia.yaml  # Linux NVIDIA + EGL override
-```
-
-The no-argument default uses the native macOS authoritative renderer in the background without a
-Viewer window; pass `--viewer` to open it explicitly. Docker/GPU selection is intentionally
-command-line-only so the active hardware
-mode remains visible in shell history. The `--sim-mode docker` mode also moves `duck-body` into
-Compose. Docker Desktop on macOS has no Linux
-GPU passthrough, so its OSMesa renderer is scene-faithful but slow; use the native mode for a smooth
-demo. On a Linux host, explicitly passing `--gpu dri` maps `/dev/dri`, while `--gpu nvidia`
-requests `gpus: all`; both use
-the same EGL render protocol and browser UI.
-
-The browser defaults to the **Clear** profile and requests its actual CSS size multiplied by the
-display pixel ratio. **Smooth** caps the stream at `960x540` with JPEG quality 82, **Clear** caps
-it at `1920x1080` with JPEG quality 95, and **Lossless** caps it at `1920x1080` with PNG. The
-startup fallback is `1280x720`, 24 FPS, JPEG quality 95. Override that fallback with
-`MICRODUCK_RENDER_WIDTH`, `MICRODUCK_RENDER_HEIGHT`, `MICRODUCK_RENDER_FPS`, and
-`MICRODUCK_RENDER_QUALITY`. `MICRODUCK_MUJOCO_GL` can explicitly select a MuJoCo GL backend.
-
-### Diagnostics
+For service diagnostics:
 
 ```bash
 docker compose ps
@@ -427,34 +275,20 @@ docker compose logs -f studio robotd tofd
 docker compose run --rm --no-deps robotctl health
 ```
 
-The final command runs a temporary tool container; it does not open a Docker shell.
-
-### Common startup and display problems
-
-| Symptom | Check and recovery |
-|---|---|
-| The scene stays on “Waiting for MuJoCo frames” | Run `./scripts/dev-stack.sh status`, then inspect `.studio-runtime/dev-stack/mujoco.log`. Use the MuJoCo card's Start/Restart action when Studio is online, or run `./scripts/dev-stack.sh` again if the page is unavailable. |
-| Controls do not move the simulated robot | Confirm all three status cards are connected, click **Enable RL**, then run the default launcher without `--skip-control-probe`. The launcher reports `contract probe passed` only after the cross-repository contracts pass. |
-| The Docker scene is choppy | On macOS, use the default native mode. OSMesa inside Docker is CPU rendering. On a supported Linux host, use the explicit `dri` or `nvidia` GPU mode. Reduce the profile to **Smooth** before reducing the authoritative physics rate. |
-| A desktop MuJoCo window appeared unexpectedly | The Viewer opens only when `--viewer` was supplied. Stop the stack and restart with `./scripts/dev-stack.sh`; that is the default background mode. |
-| Start/Restart buttons are unavailable | They are intentionally available only after `dev-stack.sh` has installed its local, allowlisted service manager. They cannot start the Studio Web service itself; restart the stack from a terminal for that case. |
-
-### Run components separately
+## Run components separately
 
 <details>
 <summary><strong>Run only MuJoCo Viewer</strong></summary>
 
-Stop the full stack first if it owns port 7801, then start the simulator body from the sibling RL
-repository:
+Stop the stack first if it owns port 7801, then run:
 
 ```bash
 ./scripts/dev-stack.sh stop
 cd ../microduck_rl
-uv run mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801 --render
+uv run --extra visualization mjpython -m mjlab_microduck.sim.body_server --keyframe HOME --port 7801 --render
 ```
 
-Close the Viewer or press `Ctrl-C` to stop it. This mode exposes the simulator TCP endpoint but
-does not start `robotd` or Studio.
+Close the Viewer or press `Ctrl-C` to stop it.
 
 </details>
 
@@ -467,32 +301,20 @@ cp .env.example .env
 uv run microduck-studio
 ```
 
-This starts only the Web service. The default robot socket is `/run/robotd.sock`; the Compose
-stack instead shares that socket through its named runtime volume. Port 8090 avoids `microduck`
-services that commonly use port 8080.
+This starts only the Web service on port 8090.
 
 </details>
 
-## When the page does not move the robot
-
-1. Run `./scripts/dev-stack.sh status`; Studio, `robotd`, and MuJoCo must all be online/healthy.
-2. Confirm the `robotd` and simulator cards are connected, then click **Enable RL**.
-3. Check `docker compose logs -f studio robotd` and
-   `.studio-runtime/dev-stack/mujoco.log` for disconnects or policy refusals.
-4. Run `./scripts/dev-stack.sh` again. It stops processes owned by the prior launch and repeats the
-   cross-repository contract probe before reporting ready.
-
 ## Training smoke tests
 
-Training jobs are disabled by default. When running Studio directly on the host, enable them with:
+Training jobs are disabled by default. For the optional 64-environment, 5-iteration smoke test,
+run Studio directly on the host with:
 
 ```bash
 MICRODUCK_STUDIO_ENABLE_JOBS=true uv run microduck-studio
 ```
 
-Studio exposes only the documented 64-environment, 5-iteration smoke test. It constructs an
-allowlisted `uv run train ...` argument list with `shell=False`; arbitrary shell commands and
-long training runs are intentionally unavailable.
+Then use the training smoke-test card on the page.
 
 ## Development
 
@@ -506,8 +328,8 @@ node --test tests/test_frontend.mjs
 
 ## Safety
 
-Studio v0.1 has no authentication. Bind it to `127.0.0.1`; non-loopback binding should be limited
-to trusted LANs. Studio sends intents only; `robotd` remains the sole safety and motor authority.
+Studio has no authentication. Keep it on `127.0.0.1` or a trusted LAN. Robot safety and motor
+control remain the responsibility of `robotd`.
 
 ## License
 
