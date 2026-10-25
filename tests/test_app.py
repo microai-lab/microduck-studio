@@ -308,6 +308,11 @@ def test_scene_catalog_and_selection_are_exposed(tmp_path):
     scene_root.mkdir(parents=True)
     (scene_root / "scene.xml").write_text("<mujoco/>")
     (scene_root / "scene_vslam.xml").write_text("<mujoco/>")
+    extension_root = scene_root.parent.parent / "sim" / "visualization" / "scenes"
+    extension_root.mkdir(parents=True)
+    (extension_root / "scene_velstand.xml").write_text("<mujoco/>")
+    (extension_root / "scene_vslam.xml").write_text("<mujoco/>")
+    (extension_root / "scene_directory.xml").mkdir()
     configured.runtime_dir.mkdir()
     (configured.runtime_dir / "simulator.json").write_text('{"scene":"scene_vslam.xml"}')
 
@@ -316,7 +321,7 @@ def test_scene_catalog_and_selection_are_exposed(tmp_path):
         assert response.status_code == 200
         assert response.json() == {
             "selected": "scene_vslam.xml",
-            "available": ["scene.xml", "scene_vslam.xml"],
+            "available": ["scene.xml", "scene_velstand.xml", "scene_vslam.xml"],
         }
 
         response = client.post("/api/services/robotd/restart", json={"scene": "scene.xml"})

@@ -125,7 +125,13 @@ def handle(
             raise ValueError("unsupported service operation")
         scene = request.get("scene")
         if scene is not None:
-            available = {path.name for path in scene_directory.glob("scene*.xml")}
+            roots = (
+                scene_directory,
+                scene_directory.parent.parent / "sim" / "visualization" / "scenes",
+            )
+            available = {
+                path.name for root in roots for path in root.glob("scene*.xml") if path.is_file()
+            }
             if service != "mujoco" or not isinstance(scene, str) or scene not in available:
                 raise ValueError("unsupported simulator scene")
             write_mounted_json(simulator_config, {"scene": scene})

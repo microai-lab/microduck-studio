@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import plistlib
 import subprocess
@@ -14,6 +15,71 @@ assert SPEC and SPEC.loader
 installer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(installer)
 REVISION = "62bd8ce12154340be97e06f7f41a0ca8f116d967"
+
+
+def load_script(name):
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), REPO / "scripts" / name)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("source", ["robot", "extension"])
+def test_body_launcher_resolves_only_the_two_scene_roots(tmp_path, source):
+    runner = load_script("run-body.py")
+    package = tmp_path / "rl" / "src" / "mjlab_microduck"
+    root = package / ("robot/microduck" if source == "robot" else "sim/visualization/scenes")
+    root.mkdir(parents=True)
+    scene = root / "scene_velstand.xml"
+    scene.write_text("<mujoco/>")
+    config = tmp_path / "simulator.json"
+    config.write_text('{"scene":"scene_velstand.xml"}')
+    assert runner.selected_scene(config, tmp_path / "rl") == scene
+
+
+def test_body_launcher_preserves_robot_scene_priority(tmp_path):
+    runner = load_script("run-body.py")
+    package = tmp_path / "rl" / "src" / "mjlab_microduck"
+    for root in (package / "robot/microduck", package / "sim/visualization/scenes"):
+        root.mkdir(parents=True)
+        (root / "scene.xml").write_text("<mujoco/>")
+    config = tmp_path / "simulator.json"
+    config.write_text('{"scene":"scene.xml"}')
+    assert runner.selected_scene(config, tmp_path / "rl") == package / "robot/microduck/scene.xml"
+
+
+@pytest.mark.parametrize("scene", ["../scene.xml", "/tmp/scene.xml", "scene_missing.xml"])
+def test_body_launcher_does_not_accept_paths_outside_scene_catalog(tmp_path, scene):
+    runner = load_script("run-body.py")
+    config = tmp_path / "simulator.json"
+    config.write_text(json.dumps({"scene": scene}))
+    with pytest.raises(SystemExit, match="invalid scene name|scene does not exist"):
+        runner.selected_scene(config, tmp_path / "rl")
+
+
+@pytest.mark.parametrize("source", ["robot", "extension"])
+def test_stack_can_select_scene_in_either_directory_without_starting_services(tmp_path, source):
+    package = tmp_path / "rl" / "src" / "mjlab_microduck"
+    scene_root = package / ("robot/microduck" if source == "robot" else "sim/visualization/scenes")
+    scene_root.mkdir(parents=True)
+    (scene_root / "scene_velstand.xml").write_text("<mujoco/>")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    prefix = LAUNCHER.read_text().split('\ncase "$action" in\n', 1)[0]
+    subprocess.run(
+        ["/bin/sh", "-c", prefix + "\nwrite_simulator_config\n", str(LAUNCHER)],
+        env={
+            **os.environ,
+            "MICRODUCK_RL_REPO": str(tmp_path / "rl"),
+            "MICRODUCK_STUDIO_RUNTIME": str(runtime),
+            "MICRODUCK_SCENE": "scene_velstand.xml",
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads((runtime / "simulator.json").read_text()) == {"scene": "scene_velstand.xml"}
 
 
 @pytest.mark.parametrize(

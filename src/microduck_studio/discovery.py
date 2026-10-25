@@ -39,8 +39,11 @@ async def repo_status(path: Path) -> dict[str, Any]:
 
 
 def scene_catalog(rl_repo: Path) -> list[str]:
-    root = rl_repo / "src" / "mjlab_microduck" / "robot" / "microduck"
-    return sorted(path.name for path in root.glob("scene*.xml") if path.is_file())
+    package = rl_repo / "src" / "mjlab_microduck"
+    roots = (package / "robot" / "microduck", package / "sim" / "visualization" / "scenes")
+    return sorted(
+        {path.name for root in roots for path in root.glob("scene*.xml") if path.is_file()}
+    )
 
 
 def selected_scene(runtime_dir: Path) -> str | None:

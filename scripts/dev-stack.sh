@@ -285,8 +285,10 @@ ensure_sim_source() {
 
 write_simulator_config() {
     scene_dir="$MICRODUCK_RL_REPO/src/mjlab_microduck/robot/microduck"
+    extension_scene_dir="$MICRODUCK_RL_REPO/src/mjlab_microduck/sim/visualization/scenes"
     case "$SCENE" in scene*.xml) ;; *) die "--scene must name an RL scene*.xml file" ;; esac
-    [ -f "$scene_dir/$SCENE" ] || die "RL scene does not exist: $SCENE"
+    [ -f "$scene_dir/$SCENE" ] || [ -f "$extension_scene_dir/$SCENE" ] ||
+        die "RL scene does not exist: $SCENE"
     python3 -c '
 import json, os, sys
 path, scene = sys.argv[1:]

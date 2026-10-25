@@ -15,10 +15,15 @@ def selected_scene(config: Path, rl_root: Path) -> Path:
     name = payload.get("scene")
     if not isinstance(name, str) or Path(name).name != name or not name.startswith("scene"):
         raise SystemExit("Studio simulator config has an invalid scene name")
-    scene = rl_root / "src" / "mjlab_microduck" / "robot" / "microduck" / name
-    if scene.suffix != ".xml" or not scene.is_file():
-        raise SystemExit(f"Studio simulator scene does not exist: {name}")
-    return scene
+    package = rl_root / "src" / "mjlab_microduck"
+    roots = (package / "robot" / "microduck", package / "sim" / "visualization" / "scenes")
+    # Existing robot scenes win on duplicate names; extension scenes remain
+    # in their own directory so their relative model references are preserved.
+    for root in roots:
+        scene = root / name
+        if scene.suffix == ".xml" and scene.is_file():
+            return scene
+    raise SystemExit(f"Studio simulator scene does not exist: {name}")
 
 
 def main() -> None:
